@@ -604,90 +604,90 @@ class BirthdayBot:
         target_username = None
         target_full_name = None
         
+        # ИСПРАВЛЕННАЯ ЧАСТЬ - поиск пользователя
         if user_arg.isdigit():
             # Это user_id
             target_user_id = int(user_arg)
-        
-        try:
-            # Пытаемся получить информацию о пользователе
-            target_user = await context.bot.get_chat(target_user_id)
-            target_username = target_user.username
-            target_full_name = target_user.full_name
-        except Exception as e:
-            logger.error(f"Ошибка получения информации о пользователе {target_user_id}: {e}")
-            # Используем значения по умолчанию
-            target_username = None
-            target_full_name = f"Пользователь {target_user_id}"
-        
+            # Нужно получить username и full_name
+            try:
+                # Пытаемся получить информацию о пользователе
+                target_user = await context.bot.get_chat(target_user_id)
+                target_username = target_user.username
+                target_full_name = target_user.full_name
+            except Exception as e:
+                logger.error(f"Ошибка получения информации о пользователе {target_user_id}: {e}")
+                # Используем значения по умолчанию
+                target_username = None
+                target_full_name = f"Пользователь {target_user_id}"
+            
         elif user_arg.startswith('@'):
-            # Это username, нужно получить user_id
             # Это username
-        username = user_arg[1:].lower()
+            username = user_arg[1:].lower()
         
-        # Ищем пользователя в чате
-        found = False
-        try:
-            async for member in chat.get_members():
-                if member.user.username and member.user.username.lower() == username:
-                    target_user_id = member.user.id
-                    target_username = member.user.username
-                    target_full_name = member.user.full_name
-                    found = True
-                    break
-        except Exception as e:
-            logger.error(f"Ошибка поиска пользователя по username: {e}")
-            
-        if not found:
-            # Ищем в базе данных
-            cursor = await db_conn.conn.execute(
-                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
-                (chat.id, username)
-            )
-            result = await cursor.fetchone()
-            
-            if result:
-                target_user_id = result['user_id']
-                target_username = result['username']
-                target_full_name = result['full_name']
-                found = True
-                
-    else:
-        # Это имя, ищем в базе
-        cursor = await db_conn.conn.execute(
-            'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND (full_name LIKE ? OR LOWER(username) LIKE ?)',
-            (chat.id, f'%{user_arg}%', f'%{user_arg.lower()}%')
-        )
-        result = await cursor.fetchone()
-        
-        if result:
-            target_user_id = result['user_id']
-            target_username = result['username']
-            target_full_name = result['full_name']
-            found = True
-        else:
-            # Ищем в участниках чата
+            # Ищем пользователя в чате
             found = False
             try:
                 async for member in chat.get_members():
-                    if user_arg.lower() in member.user.full_name.lower():
+                    if member.user.username and member.user.username.lower() == username:
                         target_user_id = member.user.id
                         target_username = member.user.username
                         target_full_name = member.user.full_name
                         found = True
                         break
             except Exception as e:
-                logger.error(f"Ошибка поиска пользователя по имени: {e}")
+                logger.error(f"Ошибка поиска пользователя по username: {e}")
+            
+            if not found:
+                # Ищем в базе данных
+                cursor = await db_conn.conn.execute(
+                    'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
+                    (chat.id, username)
+                )
+                result = await cursor.fetchone()
+            
+                if result:
+                    target_user_id = result['user_id']
+                    target_username = result['username']
+                    target_full_name = result['full_name']
+                    found = True
+                
+        else:
+            # Это имя, ищем в базе
+            cursor = await db_conn.conn.execute(
+                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND (full_name LIKE ? OR LOWER(username) LIKE ?)',
+                (chat.id, f'%{user_arg}%', f'%{user_arg.lower()}%')
+            )
+            result = await cursor.fetchone()
+        
+            if result:
+                target_user_id = result['user_id']
+                target_username = result['username']
+                target_full_name = result['full_name']
+                found = True
+            else:
+                # Ищем в участниках чата
+                found = False
+                try:
+                    async for member in chat.get_members():
+                        if user_arg.lower() in member.user.full_name.lower():
+                            target_user_id = member.user.id
+                            target_username = member.user.username
+                            target_full_name = member.user.full_name
+                            found = True
+                            break
+                except Exception as e:
+                    logger.error(f"Ошибка поиска пользователя по имени: {e}")
     
-    if not found:
-        await update.message.reply_text(
-            "❌ Пользователь не найден в этом чате.\n\n"
-            "Советы:\n"
-            "1. Убедитесь, что пользователь писал в чат\n"
-            "2. Используйте точный username (с @)\n"
-            "3. Или используйте ID пользователя\n"
-            f"4. Вы искали: {user_arg}"
-        )
-        return
+        if not found:
+            await update.message.reply_text(
+                "❌ Пользователь не найден в этом чате.\n\n"
+                "Советы:\n"
+                "1. Убедитесь, что пользователь писал в чат\n"
+                "2. Используйте точный username (с @)\n"
+                "3. Или используйте ID пользователя\n"
+                f"4. Вы искали: {user_arg}"
+            )
+            return
         
         # Парсим дату
         parsed = DateParser.parse_birthday(f"др {date_arg}")
