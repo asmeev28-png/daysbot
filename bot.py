@@ -62,81 +62,81 @@ class BirthdayBot:
             raise
     
     def _register_handlers(self):
-        """Регистрация всех обработчиков команд для PTB v20+"""
-        # ОБЩИЕ КОМАНДЫ
-        self.application.add_handler(CommandHandler("start", self._handle_start))
-        self.application.add_handler(CommandHandler("about", self._handle_about))
-        self.application.add_handler(CommandHandler("mybirthday", self._handle_mybirthday))
-        self.application.add_handler(CommandHandler("birthlist", self._handle_birthlist))
-        self.application.add_handler(CommandHandler("dr", self._handle_dr_search))
-        self.application.add_handler(CommandHandler("whoisnext", self._handle_whoisnext))
-        self.application.add_handler(CommandHandler("list_events", self._handle_list_events))
-        self.application.add_handler(CommandHandler("next_events", self._handle_next_events))
-        
-        # Обработчик добавления ДР через сообщение
-        self.application.add_handler(MessageHandler(
-            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+') &
-            filters.ChatType.GROUPS,
-            self._handle_birthday_message
-        ))
-        
-        # АДМИНСКИЕ КОМАНДЫ
-        self.application.add_handler(CommandHandler(
-            "add", self._handle_add_birthday_admin, filters=filters.ChatType.GROUPS
-        ))
-        self.application.add_handler(CommandHandler(
-            "delete", self._handle_delete_birthday, filters=filters.ChatType.GROUPS
-        ))
-        self.application.add_handler(CommandHandler(
-            "force_congratulate", self._handle_force_congratulate, filters=filters.ChatType.GROUPS
-        ))
-        self.application.add_handler(MessageHandler(
-            filters.Regex(r'^/add_event\s+.+') & filters.ChatType.GROUPS,
-            self.
-        ))
-        self.application.add_handler(CommandHandler(
-            "delete_event", self._handle_delete_event, filters=filters.ChatType.GROUPS
-        ))
-        self.application.add_handler(CommandHandler(
-            "toggle_event", self._handle_toggle_event, filters=filters.ChatType.GROUPS
-        ))
-        
-        # КОМАНДЫ ВЛАДЕЛЬЦА (только в ЛС)
-        owner_filter = filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        self.application.add_handler(CommandHandler("add_chat", self._handle_add_chat_owner, filters=owner_filter))
-        self.application.add_handler(CommandHandler("remove_chat", self._handle_remove_chat_owner, filters=owner_filter))
-        self.application.add_handler(CommandHandler("list_chats", self._handle_list_chats_owner, filters=owner_filter))
-        self.application.add_handler(CommandHandler("stats", self._handle_stats_owner, filters=owner_filter))
-        self.application.add_handler(CommandHandler("owner_help", self._handle_owner_help, filters=owner_filter))
-        self.application.add_handler(MessageHandler(
-            filters.Document.TEXT & owner_filter,
-            self._handle_upload_congrats
-        ))
-        
-        # ОБРАБОТЧИКИ СОБЫТИЙ ЧАТА
-        self.application.add_handler(MessageHandler(
-            filters.StatusUpdate.LEFT_CHAT_MEMBER,
-            self._handle_user_left
-        ))
-        self.application.add_handler(MessageHandler(
-            filters.StatusUpdate.NEW_CHAT_MEMBERS,
-            self._handle_new_chat_members
-        ))
-        
-        # Обработчик команд в неразрешенных чатах
-        self.application.add_handler(MessageHandler(
-            filters.ChatType.GROUPS & filters.COMMAND,
-            self._handle_command_in_disallowed_chat
-        ))
-        
-        # Обработчик подтверждений для владельца
-        self.application.add_handler(MessageHandler(
-            filters.TEXT & owner_filter,
-            self._handle_confirmation
-        ))
-        
-        # Глобальный обработчик ошибок
-        self.application.add_error_handler(self._error_handler)
+    """Регистрация всех обработчиков команд для PTB v20+"""
+    # ОБЩИЕ КОМАНДЫ
+    self.application.add_handler(CommandHandler("start", self._handle_start))
+    self.application.add_handler(CommandHandler("about", self._handle_about))
+    self.application.add_handler(CommandHandler("mybirthday", self._handle_mybirthday))
+    self.application.add_handler(CommandHandler("birthlist", self._handle_birthlist))
+    self.application.add_handler(CommandHandler("dr", self._handle_dr_search))
+    self.application.add_handler(CommandHandler("whoisnext", self._handle_whoisnext))
+    self.application.add_handler(CommandHandler("list_events", self._handle_list_events))
+    self.application.add_handler(CommandHandler("next_events", self._handle_next_events))
+    
+    # Обработчик добавления ДР через сообщение
+    self.application.add_handler(MessageHandler(
+        filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+') &
+        filters.ChatType.GROUPS,
+        self._handle_birthday_message
+    ))
+    
+    # АДМИНСКИЕ КОМАНДЫ
+    self.application.add_handler(CommandHandler(
+        "add", self._handle_add_birthday_admin, filters=filters.ChatType.GROUPS
+    ))
+    self.application.add_handler(CommandHandler(
+        "delete", self._handle_delete_birthday, filters=filters.ChatType.GROUPS
+    ))
+    self.application.add_handler(CommandHandler(
+        "force_congratulate", self._handle_force_congratulate, filters=filters.ChatType.GROUPS
+    ))
+    self.application.add_handler(MessageHandler(
+        filters.Regex(r'^/add_event\s+.+') & filters.ChatType.GROUPS,
+        self._handle_add_event
+    ))
+    self.application.add_handler(CommandHandler(
+        "delete_event", self._handle_delete_event, filters=filters.ChatType.GROUPS
+    ))
+    self.application.add_handler(CommandHandler(
+        "toggle_event", self._handle_toggle_event, filters=filters.ChatType.GROUPS
+    ))
+    
+    # КОМАНДЫ ВЛАДЕЛЬЦА (только в ЛС)
+    owner_filter = filters.ChatType.PRIVATE & filters.User(Config.get_owners())
+    self.application.add_handler(CommandHandler("add_chat", self._handle_add_chat_owner, filters=owner_filter))
+    self.application.add_handler(CommandHandler("remove_chat", self._handle_remove_chat_owner, filters=owner_filter))
+    self.application.add_handler(CommandHandler("list_chats", self._handle_list_chats_owner, filters=owner_filter))
+    self.application.add_handler(CommandHandler("stats", self._handle_stats_owner, filters=owner_filter))
+    self.application.add_handler(CommandHandler("owner_help", self._handle_owner_help, filters=owner_filter))
+    self.application.add_handler(MessageHandler(
+        filters.Document.TEXT & owner_filter,
+        self._handle_upload_congrats
+    ))
+    
+    # ОБРАБОТЧИКИ СОБЫТИЙ ЧАТА
+    self.application.add_handler(MessageHandler(
+        filters.StatusUpdate.LEFT_CHAT_MEMBER,
+        self._handle_user_left
+    ))
+    self.application.add_handler(MessageHandler(
+        filters.StatusUpdate.NEW_CHAT_MEMBERS,
+        self._handle_new_chat_members
+    ))
+    
+    # Обработчик команд в неразрешенных чатах
+    self.application.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.COMMAND,
+        self._handle_command_in_disallowed_chat
+    ))
+    
+    # Обработчик подтверждений для владельца
+    self.application.add_handler(MessageHandler(
+        filters.TEXT & owner_filter,
+        self._handle_confirmation
+    ))
+    
+    # Глобальный обработчик ошибок
+    self.application.add_error_handler(self._error_handler)
     
     async def _set_commands(self):
         """Установка команд меню"""
@@ -1254,6 +1254,8 @@ class BirthdayBot:
             elif text in ['нет', 'отмена', 'cancel']:
                 await update.message.reply_text("❌ Удаление отменено.")
                 del context.user_data['pending_chat_remove']
+
+        pass
     
     async def _handle_list_chats_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /list_chats для владельца в ЛС"""
