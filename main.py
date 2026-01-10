@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
 import logging
-import signal
 import sys
 
-from bot import BirthdayBot
+from database import db  # Импортируем объект базы данных
 from config import Config
+from bot import BirthdayBot  # Импортируем основной класс бота
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,45 +15,34 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-class GracefulExit:
-    def __init__(self):
-        self.shutdown = False
-    
-    def __enter__(self):
-        signal.signal(signal.SIGINT, self.exit_gracefully)
-        signal.signal(signal.SIGTERM, self.exit_gracefully)
-        return self
-    
-    def exit_gracefully(self, signum, frame):
-        logger.info(f"Получен сигнал {signum}, начинаю graceful shutdown...")
-        self.shutdown = True
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
-# ЗАМЕНИТЕ старый код запуска в main.py на этот:
 async def main():
     """Основная функция запуска бота"""
     logger.info("Запуск бота для дней рождения...")
-
-    # Инициализация базы данных
-    await db.connect()
-
-    # Создание Application - ЭТО ОСНОВНОЙ ОБЪЕКТ в PTB v20+
-    application = Application.builder().token(Config.BOT_TOKEN).build()
-
-    # Регистрация обработчиков (вам нужно будет передать application в функцию)
-    register_handlers(application)  # Создайте эту функцию, куда перенесете _register_handlers из класса
-
-    # Запуск бота в режиме polling
-    logger.info("Бот запущен и начал опрос (polling)...")
-    async with application:
-        await application.start()
-        await application.updater.start_polling()  # Старт polling через application
-        # Бесконечное ожидание
-        await asyncio.Event().wait()
+    
+    try:
+        # 1. Подключаем базу данных
+        await db.connect()
+        logger.info("База данных успешно подключена")
+        
+        # 2. Создаем экземпляр бота и запускаем его
+        bot = BirthdayBot()
+        await bot.start()
+        
+    except Exception as e:
+        logger.error(f"Критическая ошибка при запуске бота: {e}")
+        # Убедимся, что база данных корректно закрывается при ошибке
+        await db.close()
+        sys.exit(1)
 
 if __name__ == '__main__':
-    # Упрощенный запуск без сложного GracefulExit для теста
+    # Проверка обязательных переменных окружения
+    if not Config.BOT_TOKEN:
+        logger.error("Не указан BOT_TOKEN в переменных окружения!")
+        sys.exit(1)
+    
+    if not Config.BOT_OWNER_ID:
+        logger.error("Не указан BOT_OWNER_ID в переменных окружения!")
+        sys.exit(1)
+    
+    # Запуск бота
     asyncio.run(main())
