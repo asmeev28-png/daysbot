@@ -37,6 +37,7 @@ class BirthdayBot:
             self.application.bot_data['owner_id'] = Config.BOT_OWNER_ID
             
             # Регистрируем обработчики
+            self._register_handlers = lambda: None
             self._register_handlers()
             
             # Настройка команд меню
