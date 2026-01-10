@@ -1,17 +1,17 @@
 import asyncio
 import logging
 from datetime import datetime, date, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from config import Config
-from database import db
+from database import db  # Импортируем глобальный объект базы данных
 from utils import get_msk_time
 
 logger = logging.getLogger(__name__)
 
 class Scheduler:
     def __init__(self, bot):
-        self.bot = bot
+        self.bot = bot  # Объект telegram.Bot из application.bot
         self.is_running = False
         self.tasks = []
     
@@ -184,7 +184,7 @@ class Scheduler:
                     message = f"🎉 Поздравляем {username} с днём рождения!\n\n"
                     message += congrats['text']
                     
-                    # Отправляем сообщение
+                    # Отправляем сообщение через объект бота
                     await self.bot.send_message(
                         chat_id=bd['chat_id'],
                         text=message
