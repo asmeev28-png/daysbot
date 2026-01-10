@@ -3,3 +3,4 @@ aiosqlite==0.19.0
 dateparser==1.1.8
 pytz==2024.1
 python-dotenv==1.0.0
+APScheduler==3.10.4
