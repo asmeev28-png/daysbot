@@ -448,7 +448,7 @@ def _register_handlers(self):
         
         await update.message.reply_text(message, parse_mode='Markdown')
 
-   async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик сообщения с днем рождения (регистронезависимый)"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
