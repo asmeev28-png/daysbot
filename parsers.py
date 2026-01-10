@@ -30,15 +30,20 @@ class DateParser:
                 return None
             
             # Настройки для парсинга русских дат
+            # В новых версиях dateparser используется 'languages' вместо 'LANGUAGES'
             settings = {
                 'DATE_ORDER': 'DMY',  # День-Месяц-Год
                 'PREFER_LOCALE_DATE_ORDER': True,
-                'LANGUAGES': ['ru'],
+                'languages': ['ru'],  # Исправлено: 'languages' вместо 'LANGUAGES'
                 'PREFER_DAY_OF_MONTH': 'first',
                 'REQUIRE_PARTS': ['day', 'month']  # Обязательно день и месяц
             }
             
             parsed_date = dateparser.parse(text, settings=settings)
+            
+            if not parsed_date:
+                # Пробуем альтернативный вариант без явного указания языка
+                parsed_date = dateparser.parse(text, date_formats=['%d.%m', '%d.%m.%Y', '%d %B', '%d %B %Y'])
             
             if not parsed_date:
                 return None
@@ -94,11 +99,11 @@ class DateParser:
             date_str = match.group(1)
             event_name = first_line[match.end():].strip()
             
-            # Парсим дату
+            # Парсим дату с исправленными настройками
             settings = {
                 'DATE_ORDER': 'DMY',
                 'PREFER_LOCALE_DATE_ORDER': True,
-                'LANGUAGES': ['ru']
+                'languages': ['ru']  # Исправлено: 'languages' вместо 'LANGUAGES'
             }
             
             parsed_date = dateparser.parse(date_str, settings=settings)
