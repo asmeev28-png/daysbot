@@ -1,11 +1,11 @@
 import logging
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
-from telegram import Update, BotCommand, InputFile
+from telegram import Update, BotCommand
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, 
+    Application, CommandHandler, MessageHandler,
     ContextTypes, filters, CallbackContext
 )
 from telegram.constants import ParseMode
@@ -15,195 +15,109 @@ from database import db
 from parsers import DateParser
 from scheduler import Scheduler
 from utils import (
-    format_birthday_list, format_upcoming_birthdays, 
-    format_event_list, calculate_next_birthday, escape_markdown
+    format_birthday_list, format_upcoming_birthdays,
+    format_event_list, escape_markdown, get_msk_time
 )
 
 logger = logging.getLogger(__name__)
 
 class BirthdayBot:
     def __init__(self):
-        self.application = None
-        self.scheduler = None
+        self.application: Optional[Application] = None
+        self.scheduler: Optional[Scheduler] = None
     
     async def start(self):
-        """Запуск бота"""
+        """Запуск бота для PTB v20+"""
         try:
-            # Инициализация базы данных            
-            logger.info("База данных подключена")
-            
-            # Создание приложения
+            # Создание Application (основной объект в v20+)
             self.application = Application.builder().token(Config.BOT_TOKEN).build()
             
-            # Инициализация планировщика
-            self.scheduler = Scheduler(self.application.bot)
-            
-            # Настройка данных бота
+            # Сохраняем данные в application.bot_data для доступа из обработчиков
             self.application.bot_data['db'] = db
             self.application.bot_data['owner_id'] = Config.BOT_OWNER_ID
             
-            # Регистрация обработчиков
+            # Регистрируем обработчики
             self._register_handlers()
             
             # Настройка команд меню
             await self._set_commands()
             
-            # Запуск бота
+            # Инициализация и запуск планировщика
+            self.scheduler = Scheduler(self.application.bot)
+            await self.scheduler.start()
+            
+            # Запуск опроса (polling) через application
+            logger.info(f"Бот запущен! Владелец: {Config.BOT_OWNER_ID}, Резервный: {Config.BACKUP_ADMIN_ID}")
             await self.application.initialize()
             await self.application.start()
             
-            # Запуск планировщика
-            await self.scheduler.start()
+            # Запускаем polling
+            await self.application.updater.start_polling(drop_pending_updates=True)
             
-            logger.info(f"Бот запущен! Владелец: {Config.BOT_OWNER_ID}, Резервный: {Config.BACKUP_ADMIN_ID}")
-            
-            # Запуск polling
-            await self.application.updater.start_polling()
-            
-            # Бесконечный цикл
+            # Бот работает. Ожидаем сигнала остановки.
             await asyncio.Event().wait()
             
         except Exception as e:
-            logger.error(f"Критическая ошибка при запуске бота: {e}")
+            logger.error(f"Критическая ошибка при запуске бота: {e}", exc_info=True)
             raise
     
     def _register_handlers(self):
-        """Регистрация всех обработчиков команд"""
-        
-        # ========== ОБЩИЕ КОМАНДЫ (для всех пользователей) ==========
-        
-        # Команды в чате
-        self.application.add_handler(CommandHandler(
-            "start", 
-            self._handle_start
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "about",
-            self._handle_about
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "mybirthday",
-            self._handle_mybirthday
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "birthlist",
-            self._handle_birthlist
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "dr",
-            self._handle_dr_search
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "whoisnext",
-            self._handle_whoisnext
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "list_events",
-            self._handle_list_events
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "next_events",
-            self._handle_next_events
-        ))
+        """Регистрация всех обработчиков команд для PTB v20+"""
+        # ОБЩИЕ КОМАНДЫ
+        self.application.add_handler(CommandHandler("start", self._handle_start))
+        self.application.add_handler(CommandHandler("about", self._handle_about))
+        self.application.add_handler(CommandHandler("mybirthday", self._handle_mybirthday))
+        self.application.add_handler(CommandHandler("birthlist", self._handle_birthlist))
+        self.application.add_handler(CommandHandler("dr", self._handle_dr_search))
+        self.application.add_handler(CommandHandler("whoisnext", self._handle_whoisnext))
+        self.application.add_handler(CommandHandler("list_events", self._handle_list_events))
+        self.application.add_handler(CommandHandler("next_events", self._handle_next_events))
         
         # Обработчик добавления ДР через сообщение
         self.application.add_handler(MessageHandler(
-            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+') & 
-            filters.ChatType.GROUPS & filters.UpdateType.MESSAGE,
+            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+') &
+            filters.ChatType.GROUPS,
             self._handle_birthday_message
         ))
         
-        # ========== АДМИНСКИЕ КОМАНДЫ (для админов чата) ==========
-        
+        # АДМИНСКИЕ КОМАНДЫ
         self.application.add_handler(CommandHandler(
-            "add",
-            self._handle_add_birthday_admin,
-            filters=filters.ChatType.GROUPS
+            "add", self._handle_add_birthday_admin, filters=filters.ChatType.GROUPS
         ))
-        
         self.application.add_handler(CommandHandler(
-            "delete",
-            self._handle_delete_birthday,
-            filters=filters.ChatType.GROUPS
+            "delete", self._handle_delete_birthday, filters=filters.ChatType.GROUPS
         ))
-        
         self.application.add_handler(CommandHandler(
-            "force_congratulate",
-            self._handle_force_congratulate,
-            filters=filters.ChatType.GROUPS
+            "force_congratulate", self._handle_force_congratulate, filters=filters.ChatType.GROUPS
         ))
-        
         self.application.add_handler(MessageHandler(
-            filters.Regex(r'^/add_event\s+.+') & 
-            filters.ChatType.GROUPS & filters.UpdateType.MESSAGE,
+            filters.Regex(r'^/add_event\s+.+') & filters.ChatType.GROUPS,
             self._handle_add_event
         ))
-        
         self.application.add_handler(CommandHandler(
-            "delete_event",
-            self._handle_delete_event,
-            filters=filters.ChatType.GROUPS
+            "delete_event", self._handle_delete_event, filters=filters.ChatType.GROUPS
+        ))
+        self.application.add_handler(CommandHandler(
+            "toggle_event", self._handle_toggle_event, filters=filters.ChatType.GROUPS
         ))
         
-        self.application.add_handler(CommandHandler(
-            "toggle_event",
-            self._handle_toggle_event,
-            filters=filters.ChatType.GROUPS
-        ))
-        
-        # ========== КОМАНДЫ ВЛАДЕЛЬЦА (только в ЛС) ==========
-        
-        self.application.add_handler(CommandHandler(
-            "add_chat",
-            self._handle_add_chat_owner,
-            filters=filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "remove_chat",
-            self._handle_remove_chat_owner,
-            filters=filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "list_chats",
-            self._handle_list_chats_owner,
-            filters=filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "stats",
-            self._handle_stats_owner,
-            filters=filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        ))
-        
-        self.application.add_handler(CommandHandler(
-            "owner_help",
-            self._handle_owner_help,
-            filters=filters.ChatType.PRIVATE & filters.User(Config.get_owners())
-        ))
-        
+        # КОМАНДЫ ВЛАДЕЛЬЦА (только в ЛС)
+        owner_filter = filters.ChatType.PRIVATE & filters.User(Config.get_owners())
+        self.application.add_handler(CommandHandler("add_chat", self._handle_add_chat_owner, filters=owner_filter))
+        self.application.add_handler(CommandHandler("remove_chat", self._handle_remove_chat_owner, filters=owner_filter))
+        self.application.add_handler(CommandHandler("list_chats", self._handle_list_chats_owner, filters=owner_filter))
+        self.application.add_handler(CommandHandler("stats", self._handle_stats_owner, filters=owner_filter))
+        self.application.add_handler(CommandHandler("owner_help", self._handle_owner_help, filters=owner_filter))
         self.application.add_handler(MessageHandler(
-            filters.Document.TEXT & filters.ChatType.PRIVATE & filters.User(Config.get_owners()),
+            filters.Document.TEXT & owner_filter,
             self._handle_upload_congrats
         ))
         
-        # ========== ОБРАБОТЧИКИ ОШИБОК И СОБЫТИЙ ==========
-        
-        # Обработчик выхода пользователя из чата
+        # ОБРАБОТЧИКИ СОБЫТИЙ ЧАТА
         self.application.add_handler(MessageHandler(
             filters.StatusUpdate.LEFT_CHAT_MEMBER,
             self._handle_user_left
         ))
-        
-        # Обработчик добавления бота в чат
         self.application.add_handler(MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS,
             self._handle_new_chat_members
@@ -213,6 +127,12 @@ class BirthdayBot:
         self.application.add_handler(MessageHandler(
             filters.ChatType.GROUPS & filters.COMMAND,
             self._handle_command_in_disallowed_chat
+        ))
+        
+        # Обработчик подтверждений для владельца
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & owner_filter,
+            self._handle_confirmation
         ))
         
         # Глобальный обработчик ошибок
@@ -229,13 +149,13 @@ class BirthdayBot:
             BotCommand("next_events", "Ближайшие события"),
             BotCommand("about", "О боте"),
         ]
-        
         await self.application.bot.set_my_commands(commands)
     
     # ========== ОБЩИЕ ОБРАБОТЧИКИ ==========
     
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         chat = update.effective_chat
         
@@ -259,7 +179,7 @@ class BirthdayBot:
             )
         else:
             # Проверяем, разрешен ли чат
-            if not await db.is_chat_allowed(chat.id):
+            if not await db_conn.is_chat_allowed(chat.id):
                 message = (
                     "❌ Этот бот не активирован в данном чате.\n\n"
                     f"ID чата: `{chat.id}`\n"
@@ -301,22 +221,23 @@ class BirthdayBot:
             "• `мой др 28.06`\n"
             "• `мой др 28 июня`\n"
             "• `мой др 28.06.1998`\n\n"
-            "Используйте `/help` для списка команд.\n"
+            "Используйте `/start` для списка команд.\n"
             "Вопросы и предложения: @yasmeev"
         )
         await update.message.reply_text(message, parse_mode='Markdown')
     
     async def _handle_mybirthday(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /mybirthday"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Получаем день рождения пользователя в этом чате
-        birthday = await db.get_birthday(user.id, chat.id)
+        birthday = await db_conn.get_birthday(user.id, chat.id)
         
         if not birthday:
             await update.message.reply_text(
@@ -346,14 +267,15 @@ class BirthdayBot:
     
     async def _handle_birthlist(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /birthlist"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Получаем все дни рождения в чате
-        birthdays = await db.get_birthdays_by_chat(chat.id)
+        birthdays = await db_conn.get_birthdays_by_chat(chat.id)
         
         # Форматируем список
         message = format_birthday_list(birthdays)
@@ -362,10 +284,11 @@ class BirthdayBot:
     
     async def _handle_dr_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /dr - поиск дня рождения"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         if not context.args:
@@ -381,7 +304,7 @@ class BirthdayBot:
         search_term = ' '.join(context.args)
         
         # Получаем все дни рождения в чате
-        birthdays = await db.get_birthdays_by_chat(chat.id)
+        birthdays = await db_conn.get_birthdays_by_chat(chat.id)
         
         # Ищем совпадения
         results = []
@@ -424,14 +347,15 @@ class BirthdayBot:
     
     async def _handle_whoisnext(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /whoisnext"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Получаем ближайшие дни рождения
-        birthdays = await db.get_upcoming_birthdays(chat.id, limit=3)
+        birthdays = await db_conn.get_upcoming_birthdays(chat.id, limit=3)
         
         # Форматируем список
         message = format_upcoming_birthdays(birthdays)
@@ -440,14 +364,15 @@ class BirthdayBot:
     
     async def _handle_list_events(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /list_events"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Получаем события чата
-        cursor = await db.conn.execute(
+        cursor = await db_conn.conn.execute(
             'SELECT * FROM events WHERE chat_id = ? AND is_active = 1 ORDER BY month, day',
             (chat.id,)
         )
@@ -461,17 +386,18 @@ class BirthdayBot:
     
     async def _handle_next_events(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /next_events"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         
         # Проверяем, разрешен ли чат
-        if chat.type != 'private' and not await db.is_chat_allowed(chat.id):
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Получаем ближайшие события
         from datetime import date
         today = date.today()
         
-        cursor = await db.conn.execute('''
+        cursor = await db_conn.conn.execute('''
             WITH today AS (SELECT DATE('now') as today_date)
             SELECT e.*,
                    CASE 
@@ -521,12 +447,13 @@ class BirthdayBot:
     
     async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик сообщения с днем рождения"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         text = update.message.text
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Парсим дату
@@ -552,7 +479,7 @@ class BirthdayBot:
             return
         
         # Добавляем или обновляем день рождения
-        success = await db.add_birthday(
+        success = await db_conn.add_birthday(
             user_id=user.id,
             chat_id=chat.id,
             day=day,
@@ -590,11 +517,12 @@ class BirthdayBot:
     
     async def _handle_add_birthday_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /add для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -645,7 +573,7 @@ class BirthdayBot:
                 logger.error(f"Ошибка поиска пользователя по username: {e}")
         else:
             # Это имя, ищем в базе
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND (full_name LIKE ? OR username LIKE ?)',
                 (chat.id, f'%{user_arg}%', f'%{user_arg}%')
             )
@@ -682,7 +610,7 @@ class BirthdayBot:
             return
         
         # Добавляем день рождения
-        success = await db.add_birthday(
+        success = await db_conn.add_birthday(
             user_id=target_user_id,
             chat_id=chat.id,
             day=day,
@@ -712,11 +640,12 @@ class BirthdayBot:
     
     async def _handle_delete_birthday(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /delete для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -750,7 +679,7 @@ class BirthdayBot:
             username = user_arg[1:]
             
             # Ищем пользователя в базе
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT user_id FROM birthdays WHERE chat_id = ? AND username = ?',
                 (chat.id, username)
             )
@@ -769,7 +698,7 @@ class BirthdayBot:
                     logger.error(f"Ошибка поиска пользователя по username: {e}")
         else:
             # Это имя, ищем в базе
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT user_id FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
                 (chat.id, f'%{user_arg}%')
             )
@@ -783,7 +712,7 @@ class BirthdayBot:
             return
         
         # Удаляем день рождения
-        success = await db.delete_birthday(target_user_id, chat.id)
+        success = await db_conn.delete_birthday(target_user_id, chat.id)
         
         if success:
             await update.message.reply_text("✅ День рождения удален.")
@@ -792,11 +721,12 @@ class BirthdayBot:
     
     async def _handle_force_congratulate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /force_congratulate для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -819,7 +749,7 @@ class BirthdayBot:
         
         user_arg = ' '.join(context.args)
         
-        # Определяем user_id по аргументу (аналогично команде /delete)
+        # Определяем user_id по аргументу
         target_user_id = None
         target_username = None
         target_full_name = None
@@ -830,7 +760,7 @@ class BirthdayBot:
             username = user_arg[1:]
             
             # Ищем в базе
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND username = ?',
                 (chat.id, username)
             )
@@ -841,7 +771,7 @@ class BirthdayBot:
                 target_username = result['username']
                 target_full_name = result['full_name']
         else:
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
                 (chat.id, f'%{user_arg}%')
             )
@@ -857,14 +787,14 @@ class BirthdayBot:
             return
         
         # Получаем день рождения
-        birthday = await db.get_birthday(target_user_id, chat.id)
+        birthday = await db_conn.get_birthday(target_user_id, chat.id)
         
         if not birthday:
             await update.message.reply_text("❌ У этого пользователя не указан день рождения.")
             return
         
         # Получаем случайное поздравление
-        congrats = await db.get_random_congratulation()
+        congrats = await db_conn.get_random_congratulation()
         
         if not congrats:
             await update.message.reply_text("❌ Нет поздравлений в базе.")
@@ -879,16 +809,17 @@ class BirthdayBot:
         # Отправляем сообщение
         await update.message.reply_text(message)
         
-        # Отмечаем как отправленное (чтобы не дублировалось сегодня)
-        await db.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
+        # Отмечаем как отправленное
+        await db_conn.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
     
     async def _handle_add_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /add_event для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -937,7 +868,7 @@ class BirthdayBot:
         
         try:
             # Добавляем событие
-            event_id = await db.add_event(
+            event_id = await db_conn.add_event(
                 chat_id=chat.id,
                 name=parsed['event_name'],
                 day=parsed['day'],
@@ -975,11 +906,12 @@ class BirthdayBot:
     
     async def _handle_delete_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /delete_event для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -1001,7 +933,7 @@ class BirthdayBot:
             event_id = int(context.args[0])
             
             # Проверяем, существует ли событие в этом чате
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT id FROM events WHERE id = ? AND chat_id = ?',
                 (event_id, chat.id)
             )
@@ -1012,8 +944,8 @@ class BirthdayBot:
                 return
             
             # Удаляем событие
-            await db.conn.execute('DELETE FROM events WHERE id = ?', (event_id,))
-            await db.conn.commit()
+            await db_conn.conn.execute('DELETE FROM events WHERE id = ?', (event_id,))
+            await db_conn.conn.commit()
             
             await update.message.reply_text(f"✅ Событие {event_id} удалено.")
             
@@ -1025,11 +957,12 @@ class BirthdayBot:
     
     async def _handle_toggle_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /toggle_event для админов"""
+        db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
         
         # Проверяем, разрешен ли чат
-        if not await db.is_chat_allowed(chat.id):
+        if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
         
         # Проверяем права админа
@@ -1051,7 +984,7 @@ class BirthdayBot:
             event_id = int(context.args[0])
             
             # Получаем текущее состояние
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT id, is_active FROM events WHERE id = ? AND chat_id = ?',
                 (event_id, chat.id)
             )
@@ -1064,11 +997,11 @@ class BirthdayBot:
             # Меняем состояние
             new_state = 0 if result['is_active'] else 1
             
-            await db.conn.execute(
+            await db_conn.conn.execute(
                 'UPDATE events SET is_active = ? WHERE id = ?',
                 (new_state, event_id)
             )
-            await db.conn.commit()
+            await db_conn.conn.commit()
             
             status = "активировано" if new_state else "деактивировано"
             await update.message.reply_text(f"✅ Событие {event_id} {status}.")
@@ -1079,10 +1012,11 @@ class BirthdayBot:
             logger.error(f"Ошибка при переключении события: {e}")
             await update.message.reply_text("❌ Ошибка при переключении события.")
     
-    # ========== ОБРАБОТЧИКИ ВЛАДЕЛЬЦА (ТОЛЬКО В ЛС) ==========
+    # ========== ОБРАБОТЧИКИ ВЛАДЕЛЬЦА ==========
     
     async def _handle_add_chat_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /add_chat для владельца в ЛС"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         
         if not Config.is_owner(user.id):
@@ -1139,7 +1073,7 @@ class BirthdayBot:
                     needs_admin = False
                 
                 # Добавляем в белый список
-                success = await db.add_chat_to_whitelist(chat_id, chat_title, user.id)
+                success = await db_conn.add_chat_to_whitelist(chat_id, chat_title, user.id)
                 
                 if success:
                     response = (
@@ -1194,6 +1128,7 @@ class BirthdayBot:
     
     async def _handle_remove_chat_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /remove_chat для владельца в ЛС"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         
         if not Config.is_owner(user.id):
@@ -1215,7 +1150,7 @@ class BirthdayBot:
             chat_id = int(context.args[0])
             
             # Получаем информацию о чате
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT chat_id, title FROM allowed_chats WHERE chat_id = ?',
                 (chat_id,)
             )
@@ -1248,8 +1183,59 @@ class BirthdayBot:
         except ValueError:
             await update.message.reply_text("❌ Неверный формат ID чата. ID должен быть числом.")
     
+    async def _handle_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка подтверждений от владельца"""
+        db_conn = context.bot_data['db']
+        user = update.effective_user
+        
+        if not Config.is_owner(user.id):
+            return
+        
+        text = update.message.text.strip().lower()
+        
+        # Проверяем подтверждение удаления чата
+        if 'pending_chat_remove' in context.user_data:
+            chat_info = context.user_data['pending_chat_remove']
+            chat_id = chat_info['chat_id']
+            
+            if text == f"да, удалить {chat_id}" or text == f"да удалить {chat_id}":
+                # Удаляем чат из белого списка
+                success = await db_conn.remove_chat_from_whitelist(chat_id)
+                
+                if success:
+                    await update.message.reply_text(
+                        f"✅ Чат `{chat_id}` удален из белого списка.\n"
+                        f"Все связанные данные были удалены.",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Пытаемся отправить сообщение в чат
+                    try:
+                        farewell_message = (
+                            "❌ Бот деактивирован в этом чате владельцем.\n\n"
+                            "Все данные о днях рождениях и событиях удалены.\n"
+                            "Для повторной активации обратитесь к владельцу бота."
+                        )
+                        
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=farewell_message
+                        )
+                    except Exception as e:
+                        logger.info(f"Не удалось отправить сообщение в деактивированный чат {chat_id}: {e}")
+                else:
+                    await update.message.reply_text("❌ Не удалось удалить чат.")
+                
+                # Очищаем данные о подтверждении
+                del context.user_data['pending_chat_remove']
+            
+            elif text in ['нет', 'отмена', 'cancel']:
+                await update.message.reply_text("❌ Удаление отменено.")
+                del context.user_data['pending_chat_remove']
+    
     async def _handle_list_chats_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /list_chats для владельца в ЛС"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         
         if not Config.is_owner(user.id):
@@ -1261,7 +1247,7 @@ class BirthdayBot:
             return
         
         # Получаем список чатов
-        chats = await db.get_all_allowed_chats()
+        chats = await db_conn.get_all_allowed_chats()
         
         if not chats:
             await update.message.reply_text("📋 Белый список пуст.")
@@ -1275,7 +1261,7 @@ class BirthdayBot:
         
         for chat in chats:
             # Количество дней рождений
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT COUNT(*) as count FROM birthdays WHERE chat_id = ?',
                 (chat['chat_id'],)
             )
@@ -1283,7 +1269,7 @@ class BirthdayBot:
             birthdays_count = birthdays_result['count'] if birthdays_result else 0
             
             # Количество событий
-            cursor = await db.conn.execute(
+            cursor = await db_conn.conn.execute(
                 'SELECT COUNT(*) as count FROM events WHERE chat_id = ? AND is_active = 1',
                 (chat['chat_id'],)
             )
@@ -1320,6 +1306,7 @@ class BirthdayBot:
     
     async def _handle_stats_owner(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /stats для владельца в ЛС"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         
         if not Config.is_owner(user.id):
@@ -1335,27 +1322,27 @@ class BirthdayBot:
             stats = {}
             
             # Количество чатов
-            cursor = await db.conn.execute('SELECT COUNT(*) as count FROM allowed_chats')
+            cursor = await db_conn.conn.execute('SELECT COUNT(*) as count FROM allowed_chats')
             result = await cursor.fetchone()
             stats['chats'] = result['count'] if result else 0
             
             # Количество дней рождений
-            cursor = await db.conn.execute('SELECT COUNT(*) as count FROM birthdays')
+            cursor = await db_conn.conn.execute('SELECT COUNT(*) as count FROM birthdays')
             result = await cursor.fetchone()
             stats['birthdays'] = result['count'] if result else 0
             
             # Количество событий
-            cursor = await db.conn.execute('SELECT COUNT(*) as count FROM events')
+            cursor = await db_conn.conn.execute('SELECT COUNT(*) as count FROM events')
             result = await cursor.fetchone()
             stats['events'] = result['count'] if result else 0
             
             # Количество поздравлений
-            cursor = await db.conn.execute('SELECT COUNT(*) as count FROM congratulations')
+            cursor = await db_conn.conn.execute('SELECT COUNT(*) as count FROM congratulations')
             result = await cursor.fetchone()
             stats['congratulations'] = result['count'] if result else 0
             
             # Самые популярные поздравления
-            cursor = await db.conn.execute('''
+            cursor = await db_conn.conn.execute('''
                 SELECT text, used_count FROM congratulations 
                 ORDER BY used_count DESC 
                 LIMIT 3
@@ -1424,6 +1411,7 @@ class BirthdayBot:
     
     async def _handle_upload_congrats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик загрузки файла с поздравлениями для владельца в ЛС"""
+        db_conn = context.bot_data['db']
         user = update.effective_user
         
         if not Config.is_owner(user.id):
@@ -1454,7 +1442,7 @@ class BirthdayBot:
                 warning = ""
             
             # Добавляем поздравления в базу
-            added_count = await db.add_congratulations(lines, user.id)
+            added_count = await db_conn.add_congratulations(lines, user.id)
             
             response = (
                 f"{warning}"
@@ -1473,17 +1461,18 @@ class BirthdayBot:
     
     async def _handle_user_left(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик выхода пользователя из чата"""
+        db_conn = context.bot_data['db']
         try:
             if update.effective_chat and update.message.left_chat_member:
                 user_id = update.message.left_chat_member.id
                 chat_id = update.effective_chat.id
                 
                 # Проверяем, разрешен ли чат
-                if not await db.is_chat_allowed(chat_id):
+                if not await db_conn.is_chat_allowed(chat_id):
                     return
                 
                 # Удаляем запись о дне рождения
-                await db.delete_birthday(user_id, chat_id)
+                await db_conn.delete_birthday(user_id, chat_id)
                 logger.info(f"Удалена запись для user_id={user_id} из chat_id={chat_id}")
                 
         except Exception as e:
@@ -1491,12 +1480,13 @@ class BirthdayBot:
     
     async def _handle_new_chat_members(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик добавления новых участников в чат"""
+        db_conn = context.bot_data['db']
         try:
             if context.bot.id in [user.id for user in update.message.new_chat_members]:
                 chat = update.effective_chat
                 
                 # Проверяем, разрешен ли чат
-                if await db.is_chat_allowed(chat.id):
+                if await db_conn.is_chat_allowed(chat.id):
                     return
                 
                 # Отправляем сообщение о необходимости активации
@@ -1557,8 +1547,11 @@ class BirthdayBot:
         if self.scheduler:
             await self.scheduler.stop()
         
+        if self.application and self.application.updater.running:
+            await self.application.updater.stop()
+        
         if self.application:
             await self.application.stop()
-                
+            await self.application.shutdown()
+        
         logger.info("Бот остановлен")
-  
