@@ -11,9 +11,16 @@ def format_birthday_list(birthdays: List[Dict[str, Any]]) -> str:
     if not birthdays:
         return "📅 В этом чате пока нет дней рождений."
     
-    month_names = [
-        'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
-        'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
+    # Месяца в именительном падеже (для заголовков)
+    month_names_nominative = [
+        'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+        'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+    ]
+    
+    # Месяца в родительном падеже (для дат)
+    month_names_genitive = [
+        'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+        'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
     ]
     
     result = "📅 Дни рождения в этом чате:\n\n"
@@ -28,20 +35,17 @@ def format_birthday_list(birthdays: List[Dict[str, Any]]) -> str:
     
     # Сортируем месяцы
     for month_num in sorted(birthdays_by_month.keys()):
-        month_name = month_names[month_num - 1]
-        result += f"**{month_name}**:\n"
+        # Именительный падеж для заголовка
+        month_name_nom = month_names_nominative[month_num - 1]
+        result += f"**{month_name_nom}**:\n"
         
         # Сортируем дни в месяце
         month_birthdays = sorted(birthdays_by_month[month_num], key=lambda x: x['day'])
-
-        month_names = [
-            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-        ]
         
         for bd in month_birthdays:
             username = f"@{bd['username']}" if bd['username'] else bd['full_name']
-            result += f"• {bd['day']} {month_name} - {username}\n"
+            # Родительный падеж для дат
+            result += f"• {bd['day']} {month_names_genitive[month_num-1]} - {username}\n"
         
         result += "\n"
     
@@ -52,7 +56,8 @@ def format_upcoming_birthdays(birthdays: List[Dict[str, Any]]) -> str:
     if not birthdays:
         return "🎂 Ближайших дней рождений нет."
     
-    month_names = [
+    # Родительный падеж для дат
+    month_names_genitive = [
         'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
     ]
@@ -61,7 +66,7 @@ def format_upcoming_birthdays(birthdays: List[Dict[str, Any]]) -> str:
     
     result = "🎂 Ближайшие дни рождения:\n\n"
     
-    for i, bd in enumerate(birthdays[:3], 1):  # Берем только первые 3
+    for i, bd in enumerate(birthdays[:3], 1):
         # Вычисляем дату следующего дня рождения
         next_birthday_year = today.year
         next_birthday = date(next_birthday_year, bd['month'], bd['day'])
@@ -72,7 +77,8 @@ def format_upcoming_birthdays(birthdays: List[Dict[str, Any]]) -> str:
         days_until = (next_birthday - today).days
         
         username = f"@{bd['username']}" if bd['username'] else bd['full_name']
-        date_str = f"{bd['day']} {month_names[bd['month']-1]}"
+        # Родительный падеж для дат
+        date_str = f"{bd['day']} {month_names_genitive[bd['month']-1]}"
         
         if days_until == 0:
             days_text = "🎉 сегодня!"
@@ -90,7 +96,7 @@ def format_event_list(events: List[Dict[str, Any]]) -> str:
     if not events:
         return "📅 В этом чате пока нет событий."
     
-    month_names = [
+    month_names_genitive = [
         'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
     ]
@@ -99,7 +105,8 @@ def format_event_list(events: List[Dict[str, Any]]) -> str:
     
     for event in events:
         status = "✅" if event['is_active'] else "❌"
-        date_str = f"{event['day']} {month_names[event['month']-1]}"
+        # Родительный падеж для дат
+        date_str = f"{event['day']} {month_names_genitive[event['month']-1]}"
         
         if event['year']:
             date_str += f" {event['year']} г."
