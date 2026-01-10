@@ -33,6 +33,11 @@ def format_birthday_list(birthdays: List[Dict[str, Any]]) -> str:
         
         # Сортируем дни в месяце
         month_birthdays = sorted(birthdays_by_month[month_num], key=lambda x: x['day'])
+
+        month_names = [
+            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+        ]
         
         for bd in month_birthdays:
             username = f"@{bd['username']}" if bd['username'] else bd['full_name']
