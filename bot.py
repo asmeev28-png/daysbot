@@ -52,7 +52,7 @@ class BirthdayBot:
             await self.application.start()
             
             # Запускаем polling
-            await self.application.updater.start_polling(drop_pending_updates=True)
+            await self.application.updater.start_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
             
             # Бот работает. Ожидаем сигнала остановки.
             await asyncio.Event().wait()
