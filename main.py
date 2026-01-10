@@ -32,34 +32,28 @@ class GracefulExit:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
+# ЗАМЕНИТЕ старый код запуска в main.py на этот:
 async def main():
     """Основная функция запуска бота"""
     logger.info("Запуск бота для дней рождения...")
-    
-    bot = BirthdayBot()
-    
-    with GracefulExit() as exit_handler:
-        try:
-            await bot.start()
-        except KeyboardInterrupt:
-            logger.info("Получен KeyboardInterrupt, останавливаю бота...")
-        except Exception as e:
-            logger.error(f"Критическая ошибка: {e}")
-            sys.exit(1)
-        finally:
-            await bot.stop()
-    
-    logger.info("Бот завершил работу")
+
+    # Инициализация базы данных
+    await db.connect()
+
+    # Создание Application - ЭТО ОСНОВНОЙ ОБЪЕКТ в PTB v20+
+    application = Application.builder().token(Config.BOT_TOKEN).build()
+
+    # Регистрация обработчиков (вам нужно будет передать application в функцию)
+    register_handlers(application)  # Создайте эту функцию, куда перенесете _register_handlers из класса
+
+    # Запуск бота в режиме polling
+    logger.info("Бот запущен и начал опрос (polling)...")
+    async with application:
+        await application.start()
+        await application.updater.start_polling()  # Старт polling через application
+        # Бесконечное ожидание
+        await asyncio.Event().wait()
 
 if __name__ == '__main__':
-    # Проверка обязательных переменных окружения
-    if not Config.BOT_TOKEN:
-        logger.error("Не указан BOT_TOKEN в переменных окружения!")
-        sys.exit(1)
-    
-    if not Config.BOT_OWNER_ID:
-        logger.error("Не указан BOT_OWNER_ID в переменных окружения!")
-        sys.exit(1)
-    
-    # Запуск бота
+    # Упрощенный запуск без сложного GracefulExit для теста
     asyncio.run(main())
