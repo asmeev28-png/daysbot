@@ -301,7 +301,7 @@ class BirthdayBot:
             )
             return
         
-        search_term = ' '.join(context.args)
+        search_term = ' '.join(context.args).lower()  # Приводим к нижнему регистру
         
         # Получаем все дни рождения в чате
         birthdays = await db_conn.get_birthdays_by_chat(chat.id)
@@ -309,9 +309,12 @@ class BirthdayBot:
         # Ищем совпадения
         results = []
         for bd in birthdays:
+            username_lower = bd['username'].lower() if bd['username'] else ''
+            fullname_lower = bd['full_name'].lower() if bd['full_name'] else ''
+            
             # Проверяем разные варианты совпадения
-            if (bd['username'] and search_term.lower() in bd['username'].lower()) or \
-               (bd['full_name'] and search_term.lower() in bd['full_name'].lower()) or \
+            if (username_lower and search_term in username_lower) or \
+               (fullname_lower and search_term in fullname_lower) or \
                str(bd['user_id']) == search_term:
                 results.append(bd)
         
@@ -455,7 +458,14 @@ class BirthdayBot:
         # Проверяем, разрешен ли чат
         if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
+
+        keywords = ['мой др', 'мой день рождения', 'др']
+        text_lower = text.lower()
+    
+        has_keyword = any(keyword in text_lower for keyword in keywords)
+        if not has_keyword:
+            return  # Игнорируем сообщения без ключевых слов
+       
         # Парсим дату
         parsed = DateParser.parse_birthday(text)
         
@@ -666,7 +676,7 @@ class BirthdayBot:
             )
             return
         
-        user_arg = ' '.join(context.args)
+        user_arg = ' '.join(context.args).lower()
         
         # Определяем user_id по аргументу
         target_user_id = None
@@ -747,7 +757,7 @@ class BirthdayBot:
             )
             return
         
-        user_arg = ' '.join(context.args)
+        user_arg = ' '.join(context.args).lower()
         
         # Определяем user_id по аргументу
         target_user_id = None
