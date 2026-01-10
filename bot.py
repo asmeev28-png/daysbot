@@ -773,60 +773,61 @@ class BirthdayBot:
         target_user_id = None
         
         if user_arg.isdigit():
-        target_user_id = int(user_arg)
-    elif user_arg.startswith('@'):
-        username = user_arg[1:].lower()
+            target_user_id = int(user_arg)
+        elif user_arg.startswith('@'):
+            username = user_arg[1:].lower()
+
+            # Поиск в базе
+            cursor = await db_conn.conn.execute(
+                'SELECT user_id FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
+                (chat.id, username)
+            )
+           result = await cursor.fetchone()
         
-        # Поиск в базе
-        cursor = await db_conn.conn.execute(
-            'SELECT user_id FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
-            (chat.id, username)
-        )
-        result = await cursor.fetchone()
-        
-        if result:
-            target_user_id = result['user_id']
-        else:
-            # Поиск в чате
-            found = False
-            try:
-                async for member in chat.get_members():
-                    if member.user.username and member.user.username.lower() == username:
-                        target_user_id = member.user.id
-                        found = True
-                        break
-            except Exception as e:
-                logger.error(f"Ошибка поиска пользователя по username: {e}")
+            if result:
+                target_user_id = result['user_id']
+            else:
+                # Поиск в чате
+                found = False
+                try:
+                    async for member in chat.get_members():
+                        if member.user.username and member.user.username.lower() == username:
+                            target_user_id = member.user.id
+                            found = True
+                            break
+                except Exception as e:
+                    logger.error(f"Ошибка поиска пользователя по username: {e}")
             
-            if not found:
+                if not found:
+                    await update.message.reply_text(
+                        f"❌ Пользователь @{username} не найден.\n\n"
+                        "Убедитесь, что:\n"
+                        "1. Пользователь есть в этом чате\n"
+                        "2. У пользователя установлен username\n"
+                        "3. Бот является администратором"
+                    )
+                    return
+        else:
+            # Поиск по имени
+            cursor = await db_conn.conn.execute(
+                'SELECT user_id FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
+                (chat.id, f'%{user_arg}%')
+            )
+            result = await cursor.fetchone()
+        
+            if result:
+                target_user_id = result['user_id']
+            else:
                 await update.message.reply_text(
-                    f"❌ Пользователь @{username} не найден.\n\n"
-                    "Убедитесь, что:\n"
-                    "1. Пользователь есть в этом чате\n"
-                    "2. У пользователя установлен username\n"
-                    "3. Бот является администратором"
+                    f"❌ Пользователь '{user_arg}' не найден в базе.\n\n"
+                    "Попробуйте:\n"
+                    "1. Использовать username с @\n"
+                    "2. Использовать ID пользователя\n"
+                    "3. Проверить правильность написания имени"
                 )
                 return
-    else:
-        # Поиск по имени
-        cursor = await db_conn.conn.execute(
-            'SELECT user_id FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
-            (chat.id, f'%{user_arg}%')
-        )
-        result = await cursor.fetchone()
-        
-        if result:
-            target_user_id = result['user_id']
-        else:
-            await update.message.reply_text(
-                f"❌ Пользователь '{user_arg}' не найден в базе.\n\n"
-                "Попробуйте:\n"
-                "1. Использовать username с @\n"
-                "2. Использовать ID пользователя\n"
-                "3. Проверить правильность написания имени"
-            )
-            return
-        
+           
+         
         # Удаляем день рождения
         success = await db_conn.delete_birthday(target_user_id, chat.id)
         
