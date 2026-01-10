@@ -14,43 +14,72 @@ class DateParser:
         Возвращает (день, месяц, год) или (день, месяц, None) если год не указан.
         """
         try:
-            # Убираем ключевые слова
+            # Убираем ключевые слова (регистронезависимо)
             patterns_to_remove = [
                 r'^мой\s*др\s*',
                 r'^мой\s*день\s*рождения\s*',
                 r'^др\s*'
             ]
             
+            text_lower = text.lower()  # Для регистронезависимого поиска
+            
             for pattern in patterns_to_remove:
-                text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+                text_lower = re.sub(pattern, '', text_lower, flags=re.IGNORECASE)
             
-            text = text.strip()
+            text_clean = text_lower.strip()
             
-            if not text:
+            if not text_clean:
                 return None
             
-            # Настройки для парсинга русских дат
-            # В новых версиях dateparser используется 'languages' вместо 'LANGUAGES'
-            settings = {
-                'DATE_ORDER': 'DMY',  # День-Месяц-Год
-                'PREFER_LOCALE_DATE_ORDER': True,
-                'languages': ['ru'],  # Исправлено: 'languages' вместо 'LANGUAGES'
-                'PREFER_DAY_OF_MONTH': 'first',
-                'REQUIRE_PARTS': ['day', 'month']  # Обязательно день и месяц
-            }
-            
-            parsed_date = dateparser.parse(text, settings=settings)
+            # Упрощенный парсинг без устаревших настроек
+            # Вариант 1: Прямой парсинг с локализацией
+            try:
+                # Новый API dateparser (после версии 1.1.x)
+                parsed_date = dateparser.parse(
+                    text_clean, 
+                    languages=['ru'],  # Просто передаем languages как параметр
+                    settings={
+                        'DATE_ORDER': 'DMY',
+                        'PREFER_DAY_OF_MONTH': 'first'
+                    }
+                )
+            except TypeError:
+                # Если не поддерживается languages как параметр
+                parsed_date = dateparser.parse(
+                    text_clean,
+                    settings={
+                        'DATE_ORDER': 'DMY',
+                        'PREFER_DAY_OF_MONTH': 'first',
+                        'LOCALES': ['ru']  # Альтернативная настройка
+                    }
+                )
             
             if not parsed_date:
-                # Пробуем альтернативный вариант без явного указания языка
-                parsed_date = dateparser.parse(text, date_formats=['%d.%m', '%d.%m.%Y', '%d %B', '%d %B %Y'])
+                # Вариант 2: Пробуем явные форматы дат
+                date_formats = [
+                    '%d.%m',       # 28.06
+                    '%d.%m.%Y',    # 28.06.1998
+                    '%d %B',       # 28 июня
+                    '%d %B %Y',    # 28 июня 1998
+                    '%d/%m',       # 28/06
+                    '%d/%m/%Y',    # 28/06/1998
+                    '%d %b',       # 28 июн
+                    '%d %b %Y',    # 28 июн 1998
+                ]
+                
+                for date_format in date_formats:
+                    try:
+                        parsed_date = datetime.strptime(text_clean, date_format)
+                        break
+                    except ValueError:
+                        continue
             
             if not parsed_date:
                 return None
             
             day = parsed_date.day
             month = parsed_date.month
-            year = parsed_date.year
+            year = parsed_date.year if hasattr(parsed_date, 'year') else None
             
             # Проверяем, что дата валидна
             try:
@@ -62,8 +91,16 @@ class DateParser:
                 return None
             
             # Если год равен текущему, считаем что год не указан
-            if year and year == datetime.now().year:
+            current_year = datetime.now().year
+            if year and year == current_year:
                 year = None
+            
+            # Если год в будущем (например, 2025 при текущем 2024), исправляем
+            if year and year > current_year:
+                # Скорее всего пользователь ввел год рождения, а не будущий год
+                # Проверяем, если год рождения вероятный (не старше 120 лет и не в будущем)
+                if year > current_year or year < current_year - 120:
+                    year = None  # Игнорируем нереалистичный год
             
             return (day, month, year)
             
@@ -79,43 +116,49 @@ class DateParser:
         Затем на следующей строке текст поздравления.
         """
         try:
-            lines = text.strip().split('\n', 2)
+            # Приводим к нижнему регистру для регистронезависимого поиска
+            text_lower = text.lower()
+            lines = text_lower.strip().split('\n', 2)
             
             if len(lines) < 2:
                 return None
             
             first_line = lines[0].strip()
             
-            # Убираем команду
+            # Убираем команду (регистронезависимо)
             first_line = re.sub(r'^/add_event\s*', '', first_line, flags=re.IGNORECASE)
             
             # Ищем дату в начале строки
             date_pattern = r'^(\d{1,2}[\.\/]\d{1,2}(?:[\.\/]\d{4})?|\d{1,2}\s+[а-яё]+(?:\s+\d{4})?)'
-            match = re.match(date_pattern, first_line, re.IGNORECASE)
+            match = re.match(date_pattern, first_line)
             
             if not match:
                 return None
             
             date_str = match.group(1)
-            event_name = first_line[match.end():].strip()
+            # Восстанавливаем оригинальный регистр для названия события
+            original_first_line = text.strip().split('\n', 2)[0]
+            original_first_line = re.sub(r'^/add_event\s*', '', original_first_line, flags=re.IGNORECASE)
+            event_name = original_first_line[match.end():].strip()
             
-            # Парсим дату с исправленными настройками
-            settings = {
-                'DATE_ORDER': 'DMY',
-                'PREFER_LOCALE_DATE_ORDER': True,
-                'languages': ['ru']  # Исправлено: 'languages' вместо 'LANGUAGES'
-            }
-            
-            parsed_date = dateparser.parse(date_str, settings=settings)
+            # Парсим дату
+            parsed_date = dateparser.parse(
+                date_str,
+                languages=['ru'],
+                settings={'DATE_ORDER': 'DMY'}
+            )
             
             if not parsed_date:
                 return None
             
             # Определяем тип события
-            has_year = parsed_date.year != datetime.now().year
+            current_year = datetime.now().year
+            has_year = parsed_date.year != current_year
             event_type = 'once' if has_year else 'yearly'
             
-            message_text = lines[1].strip()
+            # Используем оригинальный текст поздравления (сохраняем регистр)
+            original_lines = text.strip().split('\n', 2)
+            message_text = original_lines[1].strip() if len(original_lines) > 1 else ""
             
             if not message_text:
                 return None
@@ -140,23 +183,23 @@ class DateParser:
         Может быть: @username, user_id, или имя.
         """
         try:
-            # Убираем команду если есть
-            text = re.sub(r'^/(?:dr|delete|add|force_congratulate)\s*', '', text, flags=re.IGNORECASE)
-            text = text.strip()
+            # Убираем команду если есть (регистронезависимо)
+            text_clean = re.sub(r'^/(?:dr|delete|add|force_congratulate)\s*', '', text, flags=re.IGNORECASE)
+            text_clean = text_clean.strip()
             
-            if not text:
+            if not text_clean:
                 return None
             
             # Проверяем, это user_id (только цифры)
-            if text.isdigit():
-                return f"user_id:{text}"
+            if text_clean.isdigit():
+                return f"user_id:{text_clean}"
             
             # Проверяем, это username (начинается с @)
-            if text.startswith('@'):
-                return f"username:{text[1:]}"
+            if text_clean.startswith('@'):
+                return f"username:{text_clean[1:].lower()}"  # username всегда в нижнем регистре
             
-            # Иначе считаем это именем
-            return f"name:{text}"
+            # Иначе считаем это именем (сохраняем оригинальный регистр для отображения)
+            return f"name:{text_clean}"
             
         except Exception as e:
             logger.error(f"Ошибка извлечения идентификатора пользователя: {e}")
