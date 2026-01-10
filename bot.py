@@ -146,35 +146,35 @@ class BirthdayBot:
         self.application.add_error_handler(self._error_handler)
     
     async def _handle_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для отладки"""
-    chat = update.effective_chat
-    user = update.effective_user
+        """Команда для отладки"""
+        chat = update.effective_chat
+        user = update.effective_user
     
-    # Проверяем права бота
-    try:
-        bot_member = await chat.get_member(context.bot.id)
-        bot_is_admin = bot_member.status in ['administrator', 'creator']
-    except Exception as e:
-        bot_is_admin = False
+        # Проверяем права бота
+        try:
+            bot_member = await chat.get_member(context.bot.id)
+            bot_is_admin = bot_member.status in ['administrator', 'creator']
+        except Exception as e:
+            bot_is_admin = False
     
-    # Пытаемся получить список участников
-    try:
-        member_count = await chat.get_member_count()
-    except Exception as e:
-        member_count = "не удалось получить"
+        # Пытаемся получить список участников
+        try:
+            member_count = await chat.get_member_count()
+        except Exception as e:
+            member_count = "не удалось получить"
     
-    message = (
-        f"🔧 Информация для отладки:\n\n"
-        f"Чат ID: `{chat.id}`\n"
-        f"Название: {chat.title}\n"
-        f"Бот админ: {'✅' if bot_is_admin else '❌'}\n"
-        f"Участников: {member_count}\n"
-        f"Ваш ID: `{user.id}`\n"
-        f"Ваш username: @{user.username if user.username else 'нет'}\n"
-        f"Ваше имя: {user.full_name}"
-    )
+        message = (
+            f"🔧 Информация для отладки:\n\n"
+            f"Чат ID: `{chat.id}`\n"
+            f"Название: {chat.title}\n"
+            f"Бот админ: {'✅' if bot_is_admin else '❌'}\n"
+            f"Участников: {member_count}\n"
+            f"Ваш ID: `{user.id}`\n"
+            f"Ваш username: @{user.username if user.username else 'нет'}\n"
+            f"Ваше имя: {user.full_name}"
+        )
     
-    await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message, parse_mode='Markdown')
     
     async def _set_commands(self):
         """Установка команд меню"""
