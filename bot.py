@@ -447,47 +447,53 @@ class BirthdayBot:
             message += f"• **{event['name']}**\n  {date_str} ({days_text})\n\n"
         
         await update.message.reply_text(message, parse_mode='Markdown')
-    
-    async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик сообщения с днем рождения"""
-        db_conn = context.bot_data['db']
-        chat = update.effective_chat
-        user = update.effective_user
-        text = update.message.text
-        
-        # Проверяем, разрешен ли чат
-        if not await db_conn.is_chat_allowed(chat.id):
-            return await self._handle_command_in_disallowed_chat(update, context)
 
-        keywords = ['мой др', 'мой день рождения', 'др', 'Мой др', 'Мой день рождения', 'ДР', 'Мой ДР']
-        text_lower = text.lower()
+    async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+         """Обработчик сообщения с днем рождения (регистронезависимый)"""
+         db_conn = context.bot_data['db']
+         chat = update.effective_chat
+         user = update.effective_user
+         text = update.message.text
     
-        has_keyword = any(keyword in text_lower for keyword in keywords)
-        if not has_keyword:
-            return  # Игнорируем сообщения без ключевых слов
-       
-        # Парсим дату
-        parsed = DateParser.parse_birthday(text)
-        
-        if not parsed:
-            await update.message.reply_text(
-                "❌ Не удалось распознать дату.\n\n"
-                "Примеры форматов:\n"
-                "• `28.06`\n"
-                "• `28 июня`\n"
-                "• `28.06.1998`\n"
-                "• `28 июня 1998`"
-            )
-            return
-        
-        day, month, year = parsed
-        
-        # Проверяем существование даты
-        from parsers import DateValidator
-        if not DateValidator.is_valid_date(day, month, year):
-            await update.message.reply_text("❌ Такой даты не существует.")
-            return
-        
+         # Проверяем, разрешен ли чат
+         if not await db_conn.is_chat_allowed(chat.id):
+             return await self._handle_command_in_disallowed_chat(update, context)
+    
+         # Приводим текст к нижнему регистру для проверки ключевых слов
+         text_lower = text.lower()
+    
+         # Регистронезависимые ключевые слова
+         keywords = ['мой др', 'мой день рождения', 'др']
+         has_keyword = any(keyword in text_lower for keyword in keywords)
+    
+         if not has_keyword:
+             return  # Игнорируем сообщения без ключевых слов
+    
+         # Парсим дату из ОРИГИНАЛЬНОГО текста (не нижнего регистра)
+         # dateparser сам обрабатывает регистр
+         parsed = DateParser.parse_birthday(text)
+    
+         if not parsed:
+             await update.message.reply_text(
+                 "❌ Не удалось распознать дату.\n\n"
+                 "Примеры форматов:\n"
+                 "• `28.06`\n"
+                 "• `28 июня`\n"
+                 "• `28.06.1998`\n"
+                 "• `28 июня 1998`"
+             )
+             return
+    
+         day, month, year = parsed
+    
+         # Проверяем существование даты
+         from parsers import DateValidator
+         if not DateValidator.is_valid_date(day, month, year):
+             await update.message.reply_text("❌ Такой даты не существует.")
+             return
+    
+         # ... остальной код без изменений (добавление в БД)
+           
         # Добавляем или обновляем день рождения
         success = await db_conn.add_birthday(
             user_id=user.id,
