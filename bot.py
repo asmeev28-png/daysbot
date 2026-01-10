@@ -23,14 +23,13 @@ logger = logging.getLogger(__name__)
 
 class BirthdayBot:
     def __init__(self):
-        self.application: Optional[Application] = None
-        self.scheduler: Optional[Scheduler] = None
+        self.application = None
+        self.scheduler = None
     
     async def start(self):
         """Запуск бота"""
         try:
-            # Инициализация базы данных
-            await db.connect()
+            # Инициализация базы данных            
             logger.info("База данных подключена")
             
             # Создание приложения
@@ -1560,7 +1559,6 @@ class BirthdayBot:
         
         if self.application:
             await self.application.stop()
-        
-        await db.close()
+                
         logger.info("Бот остановлен")
   
