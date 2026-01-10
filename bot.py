@@ -76,7 +76,7 @@ class BirthdayBot:
         
         # Обработчик добавления ДР через сообщение
         self.application.add_handler(MessageHandler(
-            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE) &
+            filters.Regex(re.compile(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE)) &
             filters.ChatType.GROUPS,
             self._handle_birthday_message
         ))
@@ -92,7 +92,7 @@ class BirthdayBot:
             "force_congratulate", self._handle_force_congratulate, filters=filters.ChatType.GROUPS
         ))
         self.application.add_handler(MessageHandler(
-            filters.Regex(r'^/add_event\s+.+') & filters.ChatType.GROUPS,
+            filters.Regex(re.compile(r'^/add_event\s+.+', re.IGNORECASE)) & filters.ChatType.GROUPS,
             self._handle_add_event
         ))
         self.application.add_handler(CommandHandler(
