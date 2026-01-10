@@ -459,7 +459,7 @@ class BirthdayBot:
         if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
 
-        keywords = ['мой др', 'мой день рождения', 'др']
+        keywords = ['мой др', 'мой день рождения', 'др', 'Мой др', 'Мой день рождения', 'ДР', 'Мой ДР']
         text_lower = text.lower()
     
         has_keyword = any(keyword in text_lower for keyword in keywords)
