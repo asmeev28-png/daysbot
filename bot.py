@@ -449,85 +449,82 @@ def _register_handlers(self):
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-         """Обработчик сообщения с днем рождения (регистронезависимый)"""
-         db_conn = context.bot_data['db']
-         chat = update.effective_chat
-         user = update.effective_user
-         text = update.message.text
+    """Обработчик сообщения с днем рождения (регистронезависимый)"""
+    db_conn = context.bot_data['db']
+    chat = update.effective_chat
+    user = update.effective_user
+    text = update.message.text
     
-         # Проверяем, разрешен ли чат
-         if not await db_conn.is_chat_allowed(chat.id):
-             return await self._handle_command_in_disallowed_chat(update, context)
+    # Проверяем, разрешен ли чат
+    if not await db_conn.is_chat_allowed(chat.id):
+        return await self._handle_command_in_disallowed_chat(update, context)
     
-         # Приводим текст к нижнему регистру для проверки ключевых слов
-         text_lower = text.lower()
+    # Приводим текст к нижнему регистру для проверки ключевых слов
+    text_lower = text.lower()
     
-         # Регистронезависимые ключевые слова
-         keywords = ['мой др', 'мой день рождения', 'др']
-         has_keyword = any(keyword in text_lower for keyword in keywords)
+    # Регистронезависимые ключевые слова
+    keywords = ['мой др', 'мой день рождения', 'др']
+    has_keyword = any(keyword in text_lower for keyword in keywords)
     
-         if not has_keyword:
-             return  # Игнорируем сообщения без ключевых слов
+    if not has_keyword:
+        return  # Игнорируем сообщения без ключевых слов
     
-         # Парсим дату из ОРИГИНАЛЬНОГО текста (не нижнего регистра)
-         # dateparser сам обрабатывает регистр
-         parsed = DateParser.parse_birthday(text)
+    # Парсим дату из ОРИГИНАЛЬНОГО текста
+    parsed = DateParser.parse_birthday(text)
     
-         if not parsed:
-             await update.message.reply_text(
-                 "❌ Не удалось распознать дату.\n\n"
-                 "Примеры форматов:\n"
-                 "• `28.06`\n"
-                 "• `28 июня`\n"
-                 "• `28.06.1998`\n"
-                 "• `28 июня 1998`"
-             )
-             return
-    
-         day, month, year = parsed
-    
-         # Проверяем существование даты
-         from parsers import DateValidator
-         if not DateValidator.is_valid_date(day, month, year):
-             await update.message.reply_text("❌ Такой даты не существует.")
-             return
-    
-         # ... остальной код без изменений (добавление в БД)
-           
-        # Добавляем или обновляем день рождения
-        success = await db_conn.add_birthday(
-            user_id=user.id,
-            chat_id=chat.id,
-            day=day,
-            month=month,
-            year=year,
-            username=user.username,
-            full_name=user.full_name,
-            created_by=user.id
+    if not parsed:
+        await update.message.reply_text(
+            "❌ Не удалось распознать дату.\n\n"
+            "Примеры форматов:\n"
+            "• `28.06`\n"
+            "• `28 июня`\n"
+            "• `28.06.1998`\n"
+            "• `28 июня 1998`"
         )
+        return
+    
+    day, month, year = parsed
+    
+    # Проверяем существование даты
+    from parsers import DateValidator
+    if not DateValidator.is_valid_date(day, month, year):
+        await update.message.reply_text("❌ Такой даты не существует.")
+        return
+    
+    # Добавляем или обновляем день рождения
+    success = await db_conn.add_birthday(
+        user_id=user.id,
+        chat_id=chat.id,
+        day=day,
+        month=month,
+        year=year,
+        username=user.username,
+        full_name=user.full_name,
+        created_by=user.id
+    )
+    
+    if success:
+        month_names_genitive = [
+            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+        ]
         
-        if success:
-            month_names_genitive = [
-                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-            ]
-            
-            date_str = f"{day} {month_names_genitive[month-1]}"
-            
-            if year:
-                date_str += f" {year} года"
-            
-            # Проверяем 29 февраля
-            if day == 29 and month == 2:
-                await update.message.reply_text(
-                    f"✅ День рождения добавлен: {date_str}\n\n"
-                    "ℹ️ Вы указали 29 февраля. "
-                    "В невисокосные годы поздравление будет отправляться 28 февраля."
-                )
-            else:
-                await update.message.reply_text(f"✅ День рождения добавлен: {date_str}")
+        date_str = f"{day} {month_names_genitive[month-1]}"
+        
+        if year:
+            date_str += f" {year} года"
+        
+        # Проверяем 29 февраля
+        if day == 29 and month == 2:
+            await update.message.reply_text(
+                f"✅ День рождения добавлен: {date_str}\n\n"
+                "ℹ️ Вы указали 29 февраля. "
+                "В невисокосные годы поздравление будет отправляться 28 февраля."
+            )
         else:
-            await update.message.reply_text("❌ Ошибка при добавлении дня рождения.")
+            await update.message.reply_text(f"✅ День рождения добавлен: {date_str}")
+    else:
+        await update.message.reply_text("❌ Ошибка при добавлении дня рождения.")
     
     # ========== АДМИНСКИЕ ОБРАБОТЧИКИ ==========
     
