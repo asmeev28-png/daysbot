@@ -1,3 +1,4 @@
+import re
 import logging
 import asyncio
 from datetime import datetime
@@ -75,7 +76,7 @@ class BirthdayBot:
         
         # Обработчик добавления ДР через сообщение
         self.application.add_handler(MessageHandler(
-            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+') &
+            filters.Regex(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE) &
             filters.ChatType.GROUPS,
             self._handle_birthday_message
         ))
@@ -470,7 +471,7 @@ class BirthdayBot:
             return  # Игнорируем сообщения без ключевых слов
     
         # Парсим дату из ОРИГИНАЛЬНОГО текста
-        parsed = DateParser.parse_birthday(text)
+        parsed = DateParser.parse_birthday(text_lower)
     
         if not parsed:
             await update.message.reply_text(
