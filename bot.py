@@ -61,7 +61,7 @@ class BirthdayBot:
             logger.error(f"Критическая ошибка при запуске бота: {e}", exc_info=True)
             raise
     
-    def _register_handlers(self):
+def _register_handlers(self):
     """Регистрация всех обработчиков команд для PTB v20+"""
     # ОБЩИЕ КОМАНДЫ
     self.application.add_handler(CommandHandler("start", self._handle_start))
