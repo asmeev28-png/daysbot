@@ -92,7 +92,7 @@ class BirthdayBot:
         ))
         self.application.add_handler(MessageHandler(
             filters.Regex(r'^/add_event\s+.+') & filters.ChatType.GROUPS,
-            self._handle_add_event
+            self.
         ))
         self.application.add_handler(CommandHandler(
             "delete_event", self._handle_delete_event, filters=filters.ChatType.GROUPS
@@ -507,12 +507,12 @@ class BirthdayBot:
         )
         
         if success:
-            month_names = [
+            month_names_genitive = [
                 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
                 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
             ]
             
-            date_str = f"{day} {month_names[month-1]}"
+            date_str = f"{day} {month_names_genitive[month-1]}"
             
             if year:
                 date_str += f" {year} года"
@@ -895,12 +895,18 @@ class BirthdayBot:
                 media_id=media_id,
                 created_by=user.id
             )
-            
+
             # Формируем ответ
-            date_str = f"{parsed['day']:02d}.{parsed['month']:02d}"
+            month_names_genitive = [
+                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+            ]
+
+            date_str = f"{parsed['day']} {month_names_genitive[parsed['month']-1]}"
             if parsed['year']:
-                date_str += f".{parsed['year']}"
-            
+                date_str += f" {parsed['year']}"
+           
+                       
             response = (
                 f"✅ Событие добавлено!\n\n"
                 f"📅 {date_str}\n"
