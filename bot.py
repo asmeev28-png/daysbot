@@ -782,7 +782,7 @@ class BirthdayBot:
                 'SELECT user_id FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
                 (chat.id, username)
             )
-           result = await cursor.fetchone()
+            result = await cursor.fetchone()
         
             if result:
                 target_user_id = result['user_id']
