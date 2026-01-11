@@ -567,23 +567,24 @@ class BirthdayBot:
     # ========== АДМИНСКИЕ ОБРАБОТЧИКИ ==========
     
     async def _handle_add_birthday_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик команды /add для админов"""
+        """Обработчик команды /add для админов - РАБОЧАЯ ВЕРСИЯ"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
-        
+        message = update.message
+    
         # Проверяем, разрешен ли чат
         if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
+    
         # Проверяем права админа
         admins = await chat.get_administrators()
         admin_ids = [admin.user.id for admin in admins]
-        
+    
         if user.id not in admin_ids and user.id not in Config.get_owners():
             await update.message.reply_text("❌ Только администраторы могут добавлять дни рождения других участников.")
             return
-        
+    
         if len(context.args) < 2:
             await update.message.reply_text(
                 "❌ Неверный формат команды.\n"
@@ -591,71 +592,125 @@ class BirthdayBot:
                 "Примеры:\n"
                 "• `/add @username 28.06`\n"
                 "• `/add 123456789 28 июня`\n"
-                "• `/add Иван Иванов 28.06.1998`"
+                "• `/add Иван Иванов 28.06.1998`\n\n"
+                "**Важно:** Для упоминания @username пользователь должен был писать в этот чат."
             )
             return
-        
+    
         # Парсим аргументы
         user_arg = context.args[0]
         date_arg = ' '.join(context.args[1:])
-        
+    
         # Определяем user_id по аргументу
         target_user_id = None
         target_username = None
         target_full_name = None
-        
-        # ИСПРАВЛЕННАЯ ЧАСТЬ - поиск пользователя
-        if user_arg.isdigit():
-            # Это user_id
-            target_user_id = int(user_arg)
-            # Нужно получить username и full_name
-            try:
-                # Пытаемся получить информацию о пользователе
-                target_user = await context.bot.get_chat(target_user_id)
-                target_username = target_user.username
-                target_full_name = target_user.full_name
-            except Exception as e:
-                logger.error(f"Ошибка получения информации о пользователе {target_user_id}: {e}")
-                # Используем значения по умолчанию
-                target_username = None
-                target_full_name = f"Пользователь {target_user_id}"
-            
-        elif user_arg.startswith('@'):
-            # Это username
+        found = False
+    
+        # ===== СПОСОБ 1: Упоминание через @username =====
+        if user_arg.startswith('@'):
             username = user_arg[1:].lower()
         
-            # Ищем пользователя в чате
-            found = False
-            try:
-                async for member in chat.get_members():
-                    if member.user.username and member.user.username.lower() == username:
-                        target_user_id = member.user.id
-                        target_username = member.user.username
-                        target_full_name = member.user.full_name
-                        found = True
-                        break
-            except Exception as e:
-                logger.error(f"Ошибка поиска пользователя по username: {e}")
-            
+            # Пробуем найти user_id из message.entities (текстовое упоминание)
+            if message.entities:
+                for entity in message.entities:
+                    if entity.type == "mention":
+                        # Проверяем, что это наш username
+                        mention_text = message.text[entity.offset+1:entity.offset+entity.length].lower()
+                        if mention_text == username:
+                            # К сожалению, обычное mention не содержит user_id
+                            # Нужен text_mention
+                            pass
+                    elif entity.type == "text_mention":
+                        # УРА! text_mention содержит user_id!
+                        mention_text = message.text[entity.offset:entity.offset+entity.length].lower()
+                        if f"@{username}" in mention_text:
+                            target_user_id = entity.user.id
+                            target_username = entity.user.username or username
+                            target_full_name = entity.user.full_name
+                            found = True
+                            logger.info(f"Найден пользователь через text_mention: {target_user_id}")
+                            break
+        
+            # Если не нашли через entities, ищем другими способами
             if not found:
-                # Ищем в базе данных
-                cursor = await db_conn.conn.execute(
-                    'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
-                    (chat.id, username)
-                )
-                result = await cursor.fetchone()
+                # 1. Ищем среди администраторов
+                for admin in admins:
+                    if admin.user.username and admin.user.username.lower() == username:
+                        target_user_id = admin.user.id
+                        target_username = admin.user.username
+                        target_full_name = admin.user.full_name
+                        found = True
+                        logger.info(f"Найден пользователь среди администраторов: {target_user_id}")
+                        break
             
-                if result:
-                    target_user_id = result['user_id']
-                    target_username = result['username']
-                    target_full_name = result['full_name']
-                    found = True
+                # 2. Ищем в базе данных
+                if not found:
+                    cursor = await db_conn.conn.execute(
+                        'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
+                        (chat.id, username)
+                    )
+                    result = await cursor.fetchone()
                 
+                    if result:
+                        target_user_id = result['user_id']
+                        target_username = result['username']
+                        target_full_name = result['full_name']
+                        found = True
+                        logger.info(f"Найден пользователь в базе данных: {target_user_id}")
+            
+                # 3. Пытаемся получить через getChat (работает для некоторых пользователей)
+                if not found:
+                    try:
+                        # Некоторые пользователи доступны через getChat даже если не админы
+                        chat_member = await context.bot.get_chat_member(chat.id, username)
+                        target_user_id = chat_member.user.id
+                        target_username = chat_member.user.username
+                        target_full_name = chat_member.user.full_name
+                        found = True
+                        logger.info(f"Найден пользователь через getChat_member: {target_user_id}")
+                    except Exception as e:
+                        logger.warning(f"Не удалось найти пользователя @{username} через getChat: {e}")
+        
+            if not found:
+                # Последняя попытка: ищем среди упомянутых в сообщении пользователей
+                await update.message.reply_text(
+                    f"❌ Не удалось найти пользователя @{username}.\n\n"
+                    f"**Причины и решения:**\n"
+                    f"1. Пользователь должен был писать в этот чат\n"
+                    f"2. Используйте **упоминание через reply** (ответьте на сообщение пользователя)\n"
+                    f"3. Или используйте **ID пользователя**: `/add [ID] {date_arg}`\n\n"
+                    f"**Как добавить через reply:**\n"
+                    f"1. Ответьте на сообщение пользователя\n"
+                    f"2. Напишите: `/add [дата]`\n\n"
+                    f"**Как узнать ID:**\n"
+                    f"• Через бота @userinfobot\n"
+                    f"• ID пользователя: {self._find_user_id_in_message(message)}"
+                )
+                return
+    
+        # ===== СПОСОБ 2: ID пользователя =====
+        elif user_arg.isdigit():
+            target_user_id = int(user_arg)
+            found = True
+        
+            # Пытаемся получить информацию о пользователе
+            try:
+                user_chat = await context.bot.get_chat(target_user_id)
+                target_username = user_chat.username
+                target_full_name = user_chat.full_name
+                logger.info(f"Получена информация о пользователе по ID: {target_user_id}")
+            except Exception as e:
+                logger.warning(f"Не удалось получить информацию о пользователе {target_user_id}: {e}")
+                target_username = None
+                target_full_name = f"Пользователь {target_user_id}"
+    
+        # ===== СПОСОБ 3: Имя из базы данных =====
         else:
-            # Это имя, ищем в базе
+            # Ищем в базе данных по имени
             cursor = await db_conn.conn.execute(
-                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND (full_name LIKE ? OR LOWER(username) LIKE ?)',
-                (chat.id, f'%{user_arg}%', f'%{user_arg.lower()}%')
+                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
+                (chat.id, f'%{user_arg}%')
             )
             result = await cursor.fetchone()
         
@@ -665,51 +720,37 @@ class BirthdayBot:
                 target_full_name = result['full_name']
                 found = True
             else:
-                # Ищем в участниках чата
-                found = False
-                try:
-                    async for member in chat.get_members():
-                        if user_arg.lower() in member.user.full_name.lower():
-                            target_user_id = member.user.id
-                            target_username = member.user.username
-                            target_full_name = member.user.full_name
-                            found = True
-                            break
-                except Exception as e:
-                    logger.error(f"Ошибка поиска пользователя по имени: {e}")
+                await update.message.reply_text(
+                    f"❌ Пользователь '{user_arg}' не найден в базе.\n\n"
+                    "Используйте:\n"
+                    "1. @username с упоминанием\n"
+                    "2. ID пользователя\n"
+                    "3. Или попросите пользователя добавить себя: `мой др [дата]`"
+                )
+                return
     
-        if not found:
-            await update.message.reply_text(
-                "❌ Пользователь не найден в этом чате.\n\n"
-                "Советы:\n"
-                "1. Убедитесь, что пользователь писал в чат\n"
-                "2. Используйте точный username (с @)\n"
-                "3. Или используйте ID пользователя\n"
-                f"4. Вы искали: {user_arg}"
-            )
-            return
-        
-        # Парсим дату
+        # ===== ПАРСИМ ДАТУ И ДОБАВЛЯЕМ =====
         parsed = DateParser.parse_birthday(f"др {date_arg}")
-        
+    
         if not parsed:
             await update.message.reply_text(
                 "❌ Не удалось распознать дату.\n\n"
                 "Примеры форматов:\n"
                 "• `28.06`\n"
                 "• `28 июня`\n"
-                "• `28.06.1998`"
+                "• `28.06.1998`\n"
+                "• `28 июня 1998`"
             )
             return
-        
+    
         day, month, year = parsed
-        
+    
         # Проверяем существование даты
         from parsers import DateValidator
         if not DateValidator.is_valid_date(day, month, year):
             await update.message.reply_text("❌ Такой даты не существует.")
             return
-        
+    
         # Добавляем день рождения
         success = await db_conn.add_birthday(
             user_id=target_user_id,
@@ -721,23 +762,24 @@ class BirthdayBot:
             full_name=target_full_name,
             created_by=user.id
         )
-        
+    
         if success:
             month_names = [
                 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
                 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
             ]
-            
+        
             date_str = f"{day} {month_names[month-1]}"
-            
+        
             if year:
                 date_str += f" {year} года"
-            
+        
             username_display = f"@{target_username}" if target_username else target_full_name
-            
+        
             await update.message.reply_text(f"✅ День рождения для {username_display} добавлен: {date_str}")
         else:
             await update.message.reply_text("❌ Ошибка при добавлении дня рождения.")
+    
     
     async def _handle_delete_birthday(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /delete для админов"""
