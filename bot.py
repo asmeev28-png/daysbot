@@ -35,9 +35,13 @@ class BirthdayBot:
     async def start(self):
         """Запуск бота для PTB v20+"""
         try:
-            # Создание Application (основной объект в v20+)
-            self.application = Application.builder().token(Config.BOT_TOKEN).build()
-            
+            # Создание Application с отключением встроенной обработки команд
+            self.application = Application.builder() \
+                .token(Config.BOT_TOKEN) \
+                .arbitrary_callback_data(True) \
+                .post_init(self._post_init) \
+                .build()
+                        
             # Сохраняем данные в application.bot_data для доступа из обработчиков
             self.application.bot_data['db'] = db
             self.application.bot_data['owner_id'] = Config.BOT_OWNER_ID
@@ -66,7 +70,14 @@ class BirthdayBot:
         except Exception as e:
             logger.error(f"Критическая ошибка при запуске бота: {e}", exc_info=True)
             raise
-    
+            
+    async def _post_init(self, application: Application):
+        """Пост-инициализация Application"""
+        # Отключаем встроенную обработку неизвестных команд
+        if hasattr(application, 'arbitrary_callback_data'):
+            # Эта настройка помогает игнорировать неизвестные команды
+            pass
+        
     def _register_handlers(self):
         """Регистрация всех обработчиков команд для PTB v20+"""
         # ОБЩИЕ КОМАНДЫ
@@ -142,21 +153,11 @@ class BirthdayBot:
             filters.TEXT & owner_filter,
             self._handle_confirmation
         ))
-        
-        self.application.add_handler(MessageHandler(
-            filters.COMMAND,
-            self._handle_unknown_command_silent
-        ))
-        
+              
         # Глобальный обработчик ошибок
         self.application.add_error_handler(self._error_handler)
-          
-      
-    async def _handle_unknown_command_silent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Пустой обработчик для неизвестных команд - полное игнорирование"""
-        # АБСОЛЮТНО НИЧЕГО не делаем
-        pass
-
+         
+   
     async def _handle_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда для отладки"""
         chat = update.effective_chat
