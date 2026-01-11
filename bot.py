@@ -143,18 +143,20 @@ class BirthdayBot:
             self._handle_confirmation
         ))
         
-        # Глобальный обработчик ошибок
-        self.application.add_error_handler(self._error_handler)
-
         self.application.add_handler(MessageHandler(
             filters.COMMAND,
-            self._handle_do_nothing
+            self._handle_unknown_command_silent
         ))
-    
-    async def _handle_do_nothing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Не делает ничего - игнорирует команду"""
+        
+        # Глобальный обработчик ошибок
+        self.application.add_error_handler(self._error_handler)
+          
+      
+    async def _handle_unknown_command_silent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Пустой обработчик для неизвестных команд - полное игнорирование"""
+        # АБСОЛЮТНО НИЧЕГО не делаем
         pass
-    
+
     async def _handle_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда для отладки"""
         chat = update.effective_chat
