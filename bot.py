@@ -541,18 +541,18 @@ class BirthdayBot:
         return message
     
     async def _handle_next_events(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик команды /next_events"""
+        """Обработчик команды /next_events - ближайшие события"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
-        
+    
         # Проверяем, разрешен ли чат
         if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
-        # Получаем ближайшие события
+    
+        # Получаем ближайшие события (только активные)
         from datetime import date
         today = date.today()
-        
+    
         cursor = await db_conn.conn.execute('''
             WITH today AS (SELECT DATE('now') as today_date)
             SELECT e.*,
@@ -565,40 +565,43 @@ class BirthdayBot:
             FROM events e, today
             WHERE e.chat_id = ? AND e.is_active = 1
             ORDER BY days_until
-            LIMIT 3
+            LIMIT 5
         ''', (chat.id,))
-        
+    
         rows = await cursor.fetchall()
         events = [dict(row) for row in rows]
-        
+    
         if not events:
             await update.message.reply_text("📅 Ближайших событий нет.")
             return
-        
+    
         month_names = [
             'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
             'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
         ]
-        
-        message = "📅 Ближайшие события:\n\n"
-        
+    
+        message = "📅 **Ближайшие события:**\n\n"
+    
         for event in events:
             date_str = f"{event['day']} {month_names[event['month']-1]}"
-            
-            if event['year']:
-                date_str += f" {event['year']} г."
-            
+        
             days_until = int(event['days_until'])
-            
+        
             if days_until == 0:
-                days_text = "сегодня"
+                days_text = "🎉 **сегодня!**"
             elif days_until == 1:
                 days_text = "завтра"
             else:
                 days_text = f"через {days_until} дней"
-            
-            message += f"• **{event['name']}**\n  {date_str} ({days_text})\n\n"
         
+            message += f"• **{event['name']}**\n"
+            message += f"  📅 {date_str} ({days_text})\n"
+        
+            if event.get('year'):
+                message += f"  📜 Историческая дата: {event['year']} г.\n"
+        
+            message += f"  ID: {event['id']}\n\n"
+    
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _handle_birthday_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1087,27 +1090,27 @@ class BirthdayBot:
         await db_conn.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
     
     async def _handle_add_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик команды /add_event для админов"""
+        """Обработчик команды /add_event для админов - ВСЕ события ежегодные"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
-        
+    
         # Проверяем, разрешен ли чат
         if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
+    
         # Проверяем права админа
         admins = await chat.get_administrators()
         admin_ids = [admin.user.id for admin in admins]
-        
+    
         if user.id not in admin_ids and user.id not in Config.get_owners():
             await update.message.reply_text("❌ Только администраторы могут добавлять события.")
             return
-        
+    
         # Парсим команду
         text = update.message.text
         parsed = DateParser.parse_event_command(text)
-        
+    
         if not parsed:
             await update.message.reply_text(
                 "❌ Неверный формат команды.\n\n"
@@ -1119,11 +1122,11 @@ class BirthdayBot:
                 "Поздравляем с 1 мая! Ура!"
             )
             return
-        
+    
         # Проверяем медиа
         media_type = None
         media_id = None
-        
+    
         if update.message.photo:
             media_type = 'photo'
             media_id = update.message.photo[-1].file_id
@@ -1139,45 +1142,43 @@ class BirthdayBot:
         elif update.message.sticker:
             media_type = 'sticker'
             media_id = update.message.sticker.file_id
-        
+    
         try:
-            # Добавляем событие
+            # Добавляем событие (теперь все события ежегодные)
             event_id = await db_conn.add_event(
                 chat_id=chat.id,
                 name=parsed['event_name'],
                 day=parsed['day'],
                 month=parsed['month'],
-                year=parsed['year'],
+                year=parsed['year'],  # Год только для справки
                 message=parsed['message_text'],
                 media_type=media_type,
                 media_id=media_id,
                 created_by=user.id
             )
-
+        
             # Формируем ответ
-            month_names_genitive = [
+            month_names = [
                 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
                 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
             ]
-
-            date_str = f"{parsed['day']} {month_names_genitive[parsed['month']-1]}"
+        
+            date_str = f"{parsed['day']:02d}.{parsed['month']:02d}"
             if parsed['year']:
-                date_str += f" {parsed['year']}"
-           
-                       
+                date_str += f".{parsed['year']} (историческая дата)"
+            
             response = (
                 f"✅ Событие добавлено!\n\n"
                 f"📅 {date_str}\n"
                 f"🎉 {parsed['event_name']}\n"
-                f"Тип: {'разовое' if parsed['event_type'] == 'once' else 'ежегодное'}\n"
                 f"ID: {event_id}"
             )
-            
+        
             if media_type:
-                response += f"\nМедиа: {media_type}"
-            
+                response += f"\n📎 Медиа: {media_type}"
+        
             await update.message.reply_text(response)
-            
+        
         except ValueError as e:
             await update.message.reply_text(f"❌ {str(e)}")
         except Exception as e:
