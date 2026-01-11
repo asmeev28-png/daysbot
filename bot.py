@@ -170,12 +170,12 @@ class BirthdayBot:
     
             logger.info(f"Отправлено принудительное поздравление через reply для user_id={target_user_id}")
     
-                # Обработчик добавления ДР через сообщение
-                self.application.add_handler(MessageHandler(
-                    filters.Regex(re.compile(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE)) &
-                    filters.ChatType.GROUPS,
-                    self._handle_birthday_message
-                ))
+        # Обработчик добавления ДР через сообщение
+        self.application.add_handler(MessageHandler(
+            filters.Regex(re.compile(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE)) &
+            filters.ChatType.GROUPS,
+            self._handle_birthday_message
+        ))
         
         # АДМИНСКИЕ КОМАНДЫ
         self.application.add_handler(CommandHandler(
