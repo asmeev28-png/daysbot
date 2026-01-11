@@ -87,13 +87,95 @@ class BirthdayBot:
         self.application.add_handler(CommandHandler("next_events", self._handle_next_events))
         self.application.add_handler(CommandHandler("debug", self._handle_debug, filters=filters.ChatType.GROUPS))
         self.application.add_handler(CommandHandler("add", self._handle_add_with_reply, filters=filters.ChatType.GROUPS))
-        
-        # Обработчик добавления ДР через сообщение
-        self.application.add_handler(MessageHandler(
-            filters.Regex(re.compile(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE)) &
-            filters.ChatType.GROUPS,
-            self._handle_birthday_message
+        self.application.add_handler(CommandHandler(
+            "force_congratulate", 
+            self._handle_force_congratulate_reply, 
+            filters=filters.ChatType.GROUPS
         ))
+
+        async def _handle_force_congratulate_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Обработчик /force_congratulate через reply на сообщение"""
+            message = update.message
+            chat = update.effective_chat
+    
+            # Проверяем, что это reply на чье-то сообщение
+            if not message.reply_to_message:
+                # Если не reply, передаем обычному обработчику
+                return await self._handle_force_congratulate(update, context)
+    
+            replied_user = message.reply_to_message.from_user
+    
+            # Проверяем права
+            db_conn = context.bot_data['db']
+            admins = await chat.get_administrators()
+            admin_ids = [admin.user.id for admin in admins]
+    
+            if update.effective_user.id not in admin_ids and update.effective_user.id not in Config.get_owners():
+                await update.message.reply_text("❌ Только администраторы могут принудительно поздравлять.")
+                return
+    
+            # Проверяем, разрешен ли чат
+            if not await db_conn.is_chat_allowed(chat.id):
+                return await self._handle_command_in_disallowed_chat(update, context)
+    
+            # Получаем информацию о пользователе
+            target_user_id = replied_user.id
+            target_username = replied_user.username
+            target_full_name = replied_user.full_name
+    
+            # Проверяем, есть ли день рождения
+            birthday = await db_conn.get_birthday(target_user_id, chat.id)
+            has_birthday = False
+            birthday_info = ""
+    
+            if birthday:
+                has_birthday = True
+                month_names = [
+                    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+                ]
+        
+                date_str = f"{birthday['day']} {month_names[birthday['month']-1]}"
+        
+                if birthday['year']:
+                    date_str += f" {birthday['year']} года"
+        
+                birthday_info = f"\n🎂 День рождения: {date_str}"
+    
+            # Получаем случайное поздравление
+            congrats = await db_conn.get_random_congratulation()
+    
+            if not congrats:
+                await update.message.reply_text("❌ Нет поздравлений в базе.")
+                return
+    
+            # Формируем сообщение
+            username_display = f"@{target_username}" if target_username else target_full_name
+    
+            message_text = f"🎉 Принудительное поздравление для {username_display}!\n"
+    
+            if has_birthday:
+                message_text += birthday_info + "\n"
+            else:
+                message_text += "📝 (День рождения не указан)\n"
+    
+            message_text += f"\n{congrats['text']}"
+    
+            # Отправляем сообщение
+            await update.message.reply_text(message_text)
+    
+            # Отмечаем как отправленное
+            if has_birthday:
+                await db_conn.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
+    
+            logger.info(f"Отправлено принудительное поздравление через reply для user_id={target_user_id}")
+    
+                # Обработчик добавления ДР через сообщение
+                self.application.add_handler(MessageHandler(
+                    filters.Regex(re.compile(r'^(мой\s+др|мой\s+день\s+рождения|др)\s+.+', re.IGNORECASE)) &
+                    filters.ChatType.GROUPS,
+                    self._handle_birthday_message
+                ))
         
         # АДМИНСКИЕ КОМАНДЫ
         self.application.add_handler(CommandHandler(
@@ -1039,93 +1121,167 @@ class BirthdayBot:
         db_conn = context.bot_data['db']
         chat = update.effective_chat
         user = update.effective_user
-        
+        message = update.message
+    
         # Проверяем, разрешен ли чат
         if not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
+    
         # Проверяем права админа
         admins = await chat.get_administrators()
         admin_ids = [admin.user.id for admin in admins]
-        
+    
         if user.id not in admin_ids and user.id not in Config.get_owners():
             await update.message.reply_text("❌ Только администраторы могут принудительно поздравлять.")
             return
-        
+    
         if not context.args:
             await update.message.reply_text(
                 "❌ Укажите пользователя.\n"
                 "Примеры:\n"
                 "• `/force_congratulate @username`\n"
                 "• `/force_congratulate 123456789`\n"
-                "• `/force_congratulate Иван Иванов`"
+                "• `/force_congratulate Иван Иванов`\n\n"
+                "📝 **Примечание:** Можно поздравить любого пользователя, даже если у него нет дня рождения в базе."
             )
             return
-        
-        user_arg = ' '.join(context.args).lower()
-        
-        # Определяем user_id по аргументу
+    
+        user_arg = ' '.join(context.args)
+    
+        # Переменные для информации о пользователе
         target_user_id = None
         target_username = None
         target_full_name = None
-        
-        if user_arg.isdigit():
+        has_birthday = False
+        birthday_info = ""
+    
+        # ===== СПОСОБ 1: Поиск через упоминания в сообщении =====
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    # Упоминание с user_id
+                    mention_text = message.text[entity.offset:entity.offset+entity.length]
+                    if user_arg in mention_text:
+                        target_user_id = entity.user.id
+                        target_username = entity.user.username
+                        target_full_name = entity.user.full_name
+                        break
+                elif entity.type == "mention":
+                    # Обычное @упоминание
+                    mention_text = message.text[entity.offset+1:entity.offset+entity.length]
+                    if mention_text.lower() == user_arg.lstrip('@').lower():
+                        # Для обычного упоминания нет user_id, нужно искать другими способами
+                        pass
+    
+        # ===== СПОСОБ 2: Поиск по ID =====
+        if not target_user_id and user_arg.isdigit():
             target_user_id = int(user_arg)
-        elif user_arg.startswith('@'):
-            username = user_arg[1:]
-            
-            # Ищем в базе
+        
+            # Пытаемся получить информацию о пользователе
+            try:
+                user_chat = await context.bot.get_chat(target_user_id)
+                target_username = user_chat.username
+                target_full_name = user_chat.full_name
+            except Exception as e:
+                logger.warning(f"Не удалось получить информацию о пользователе {target_user_id}: {e}")
+                target_full_name = f"Пользователь {target_user_id}"
+    
+        # ===== СПОСОБ 3: Поиск по username =====
+        elif not target_user_id and user_arg.startswith('@'):
+            username = user_arg[1:].lower()
+        
+            # Ищем в базе данных
             cursor = await db_conn.conn.execute(
-                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND username = ?',
+                'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
                 (chat.id, username)
             )
             result = await cursor.fetchone()
-            
+        
             if result:
                 target_user_id = result['user_id']
                 target_username = result['username']
                 target_full_name = result['full_name']
-        else:
+            else:
+                # Ищем среди администраторов чата
+                for admin in admins:
+                    if admin.user.username and admin.user.username.lower() == username:
+                        target_user_id = admin.user.id
+                        target_username = admin.user.username
+                        target_full_name = admin.user.full_name
+                        break
+    
+        # ===== СПОСОБ 4: Поиск по имени =====
+        elif not target_user_id:
+            # Ищем в базе данных
             cursor = await db_conn.conn.execute(
                 'SELECT user_id, username, full_name FROM birthdays WHERE chat_id = ? AND full_name LIKE ?',
                 (chat.id, f'%{user_arg}%')
             )
             result = await cursor.fetchone()
-            
+        
             if result:
                 target_user_id = result['user_id']
                 target_username = result['username']
                 target_full_name = result['full_name']
-        
+    
+        # ===== Если пользователь не найден =====
         if not target_user_id:
-            await update.message.reply_text("❌ Пользователь не найден.")
+            await update.message.reply_text(
+                f"❌ Не удалось идентифицировать пользователя '{user_arg}'.\n\n"
+                "Попробуйте:\n"
+                "1. **Упоминание через reply** (ответьте на сообщение пользователя)\n"
+                "2. **Точный username с @** (например @username)\n"
+                "3. **ID пользователя** (узнать через @userinfobot)\n\n"
+                "📝 Для reply-способа:\n"
+                "1. Ответьте на сообщение пользователя\n"
+                "2. Напишите `/force_congratulate`"
+            )
             return
-        
-        # Получаем день рождения
+    
+        # ===== Проверяем, есть ли день рождения =====
         birthday = await db_conn.get_birthday(target_user_id, chat.id)
+    
+        if birthday:
+            has_birthday = True
+            month_names = [
+                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+            ]
         
-        if not birthday:
-            await update.message.reply_text("❌ У этого пользователя не указан день рождения.")
-            return
+            date_str = f"{birthday['day']} {month_names[birthday['month']-1]}"
         
-        # Получаем случайное поздравление
+            if birthday['year']:
+                date_str += f" {birthday['year']} года"
+        
+            birthday_info = f"\n🎂 День рождения: {date_str}"
+    
+        # ===== Получаем случайное поздравление =====
         congrats = await db_conn.get_random_congratulation()
-        
+    
         if not congrats:
             await update.message.reply_text("❌ Нет поздравлений в базе.")
             return
-        
-        # Формируем сообщение
-        username = f"@{birthday['username']}" if birthday['username'] else birthday['full_name']
-        
-        message = f"🎉 Принудительное поздравление для {username}!\n\n"
-        message += congrats['text']
-        
-        # Отправляем сообщение
-        await update.message.reply_text(message)
-        
-        # Отмечаем как отправленное
-        await db_conn.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
+    
+        # ===== Формируем сообщение =====
+        username_display = f"@{target_username}" if target_username else target_full_name
+    
+        message_text = f"🎉 Принудительное поздравление для {username_display}!\n"
+    
+        if has_birthday:
+            message_text += birthday_info + "\n"
+        else:
+            message_text += "📝 (День рождения не указан)\n"
+    
+        message_text += f"\n{congrats['text']}"
+    
+        # ===== Отправляем сообщение =====
+        await update.message.reply_text(message_text)
+    
+        # ===== Отмечаем как отправленное (только если есть день рождения) =====
+        if has_birthday:
+            await db_conn.mark_birthday_sent(target_user_id, chat.id, congrats['id'])
+    
+        logger.info(f"Отправлено принудительное поздравление для user_id={target_user_id} (ДР: {has_birthday})")
     
     async def _handle_add_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /add_event для админов - ВСЕ события ежегодные"""
