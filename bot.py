@@ -197,7 +197,7 @@ class BirthdayBot:
                 "Пример: `/add 11.01`\n\n"
                 f"Будет добавлен: {replied_user.full_name} (@{replied_user.username if replied_user.username else 'нет username'})"
             )
-           return
+            return
     
         date_arg = ' '.join(context.args)
     
