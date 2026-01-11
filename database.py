@@ -357,7 +357,7 @@ class Database:
     
     async def add_event(self, chat_id, name, day, month, year=None, message=None, 
                         media_type=None, media_id=None, created_by=None):
-        """Добавление события (все события повторяются ежегодно)"""
+        """Добавление события - ВСЕ события повторяются ежегодно"""
         try:
             cursor = await self.conn.execute('''
                 INSERT INTO events (chat_id, name, day, month, year, message, 
@@ -371,11 +371,10 @@ class Database:
             logger.error(f"Ошибка при добавлении события: {e}")
             raise
     
-    async def get_todays_events(self, today: date) -> List[Dict]:
-        """Получить события на сегодня"""
+   async def get_todays_events(self, today: date) -> List[Dict]:
+        """Получить события на сегодня - ВСЕ события ежегодные"""
         day = today.day
         month = today.month
-        year = today.year
         
         try:
             cursor = await self.conn.execute('''
@@ -383,9 +382,8 @@ class Database:
                 LEFT JOIN sent_events se ON e.id = se.event_id AND se.sent_date = DATE('now')
                 WHERE e.is_active = 1 
                 AND e.month = ? AND e.day = ?
-                AND (e.year IS NULL OR e.year = ?)
                 AND se.id IS NULL
-            ''', (month, day, year))
+            ''', (month, day))
             
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
@@ -393,6 +391,22 @@ class Database:
             logger.error(f"Ошибка получения сегодняшних событий: {e}")
             return []
     
+    async def get_events_by_date(self, day: int, month: int) -> List[Dict]:
+        """Получить события на конкретную дату (для планировщика)"""
+        try:
+            cursor = await self.conn.execute('''
+                SELECT * FROM events 
+                WHERE is_active = 1 
+                AND month = ? AND day = ?
+                ORDER BY chat_id
+            ''', (month, day))
+            
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка получения событий на дату {day}.{month}: {e}")
+            return []
+            
     async def mark_event_sent(self, event_id: int) -> bool:
         """Отметить отправленное событие"""
         try:
