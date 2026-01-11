@@ -75,7 +75,7 @@ class Scheduler:
                 await asyncio.sleep(60)  # Ждем минуту при ошибке
     
     async def _event_scheduler(self):
-        """Планировщик для событий (10:00 MSK)"""
+        """Планировщик для событий (10:00 MSK) - ВСЕ события ежегодные"""
         while self.is_running:
             try:
                 now = get_msk_time()
@@ -208,7 +208,7 @@ class Scheduler:
             logger.error(f"Критическая ошибка при отправке поздравлений: {e}")
     
     async def _send_events(self):
-        """Отправка событий"""
+        """Отправка событий - ВСЕ события ежегодные"""
         logger.info("Начинаю отправку событий")
         
         try:
@@ -229,7 +229,12 @@ class Scheduler:
                         continue
                     
                     # Формируем сообщение
-                    message = f"🎉 {event['name']}\n\n"
+                    message = f"🎉 **{event['name']}**\n\n"
+                    
+                    # Добавляем год события, если он указан
+                    if event['year']:
+                        message += f"📜 {event['year']} год\n\n"
+                    
                     message += event['message']
                     
                     # Отправляем сообщение
@@ -247,19 +252,22 @@ class Scheduler:
                             await media_methods[event['media_type']](
                                 chat_id=event['chat_id'],
                                 **{event['media_type']: event['media_id']},
-                                caption=message
+                                caption=message,
+                                parse_mode='Markdown'
                             )
                         else:
                             # Если тип медиа не поддерживается, отправляем только текст
                             await self.bot.send_message(
                                 chat_id=event['chat_id'],
-                                text=message
+                                text=message,
+                                parse_mode='Markdown'
                             )
                     else:
                         # Отправляем только текст
                         await self.bot.send_message(
                             chat_id=event['chat_id'],
-                            text=message
+                            text=message,
+                            parse_mode='Markdown'
                         )
                     
                     logger.info(f"Отправлено событие '{event['name']}' в чате {event['chat_id']}")
@@ -323,7 +331,8 @@ class Scheduler:
                     # Отправляем сообщение
                     await self.bot.send_message(
                         chat_id=chat_id,
-                        text=message
+                        text=message,
+                        parse_mode='Markdown'
                     )
                     
                     logger.info(f"Отправлено месячное напоминание в чат {chat_id}")
@@ -359,14 +368,8 @@ class Scheduler:
                 WHERE sent_date < ?
             ''', (thirty_days_ago,))
             
-            # Деактивируем разовые события, которые уже прошли
-            today = get_msk_time().date()
-            await db.conn.execute('''
-                UPDATE events 
-                SET is_active = 0 
-                WHERE year IS NOT NULL 
-                AND (year < ? OR (year = ? AND (month < ? OR (month = ? AND day < ?))))
-            ''', (today.year, today.year, today.month, today.month, today.day))
+            # НЕ деактивируем события - теперь все события ежегодные
+            # Если нужно деактивировать определенные события, используйте /toggle_event
             
             await db.conn.commit()
             
@@ -374,3 +377,12 @@ class Scheduler:
             
         except Exception as e:
             logger.error(f"Ошибка при очистке устаревших данных: {e}")
+    
+    # Добавьте этот метод для ручного запуска
+    async def send_todays_events_now(self):
+        """Немедленная отправка сегодняшних событий (для отладки)"""
+        await self._send_events()
+    
+    async def send_todays_birthdays_now(self):
+        """Немедленная отправка сегодняшних дней рождения (для отладки)"""
+        await self._send_birthday_congratulations()
