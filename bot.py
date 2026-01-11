@@ -35,12 +35,8 @@ class BirthdayBot:
     async def start(self):
         """Запуск бота для PTB v20+"""
         try:
-            # Создание Application с отключением встроенной обработки команд
-            self.application = Application.builder() \
-                .token(Config.BOT_TOKEN) \
-                .arbitrary_callback_data(True) \
-                .post_init(self._post_init) \
-                .build()
+            # Простое создание Application без дополнительных опций
+            self.application = Application.builder().token(Config.BOT_TOKEN).build()
                         
             # Сохраняем данные в application.bot_data для доступа из обработчиков
             self.application.bot_data['db'] = db
@@ -145,7 +141,7 @@ class BirthdayBot:
         # Обработчик команд в неразрешенных чатах
         self.application.add_handler(MessageHandler(
             filters.ChatType.GROUPS & filters.COMMAND,
-            self._handle_command_in_disallowed_chat
+            self._handle_command_check
         ))
         
         # Обработчик подтверждений для владельца
@@ -153,11 +149,21 @@ class BirthdayBot:
             filters.TEXT & owner_filter,
             self._handle_confirmation
         ))
-              
+      
+        # 8. В САМОМ КОНЦЕ - пустой обработчик для неизвестных команд
+        self.application.add_handler(MessageHandler(
+            filters.COMMAND,
+            self._handle_ignore_command
+        ))  
+
         # Глобальный обработчик ошибок
         self.application.add_error_handler(self._error_handler)
          
-   
+    async def _handle_ignore_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Пустой обработчик для полного игнорирования команд"""
+        # АБСОЛЮТНО НИЧЕГО не делаем
+        pass
+        
     async def _handle_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда для отладки"""
         chat = update.effective_chat
