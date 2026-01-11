@@ -475,23 +475,70 @@ class BirthdayBot:
         """Обработчик команды /list_events"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
-        
-        # Проверяем, разрешен ли чат
+    
+        # Проверяем, разрешен ли чат - НЕ проверяем для личных сообщений
         if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
-        # Получаем события чата
+    
+        # Получаем события чата - ВСЕ события, а не только активные
         cursor = await db_conn.conn.execute(
-            'SELECT * FROM events WHERE chat_id = ? AND is_active = 1 ORDER BY month, day',
+            'SELECT * FROM events WHERE chat_id = ? ORDER BY month, day',
             (chat.id,)
         )
         rows = await cursor.fetchall()
         events = [dict(row) for row in rows]
-        
+    
+        if not events:
+            await update.message.reply_text(
+                "📅 Событий пока нет.\n\n"
+                "Чтобы добавить событие:\n"
+                "`/add_event 01.05 Название события`\n"
+                "Текст поздравления на следующей строке"
+            )
+            return
+    
         # Форматируем список
-        message = format_event_list(events)
-        
+        message = self._format_events_list(events)
+    
         await update.message.reply_text(message, parse_mode='Markdown')
+
+    def _format_events_list(self, events):
+        """Форматирование списка событий"""
+        if not events:
+            return "📅 Событий пока нет."
+    
+        month_names = [
+            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+        ]
+    
+        message = "📅 **Список событий:**\n\n"
+    
+        for event in events:
+            date_str = f"{event['day']} {month_names[event['month']-1]}"
+        
+            if event['year']:
+                date_str += f" {event['year']} г."
+        
+            status = "✅" if event['is_active'] else "❌"
+        
+            message += f"{status} **{event['name']}**\n"
+            message += f"   📅 {date_str}\n"
+            message += f"   ID: {event['id']}\n"
+        
+            if event['message']:
+                message_preview = event['message'][:50] + "..." if len(event['message']) > 50 else event['message']
+                message += f"   💬 {message_preview}\n"
+        
+            message += "\n"
+    
+        message += "\n**Управление событиями:**\n"
+        message += "• `/add_event [дата] [название]` + текст - добавить\n"
+        message += "• `/delete_event [ID]` - удалить событие\n"
+        message += "• `/toggle_event [ID]` - вкл/выкл событие\n"
+        message += "• `/next_events` - ближайшие события"
+    
+        return message
     
     async def _handle_next_events(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /next_events"""
