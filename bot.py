@@ -158,7 +158,31 @@ class BirthdayBot:
 
         # Глобальный обработчик ошибок
         self.application.add_error_handler(self._error_handler)
-         
+
+    async def _handle_command_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Проверяет команду и либо обрабатывает, либо игнорирует"""
+        db_conn = context.bot_data['db']
+        chat = update.effective_chat
+        command = update.message.text.split()[0].lower()
+    
+        # Список известных команд
+        known_commands = [
+            '/start', '/about', '/mybirthday', '/birthlist', '/dr', '/whoisnext',
+            '/list_events', '/next_events', '/add', '/delete', '/force_congratulate',
+            '/add_event', '/delete_event', '/toggle_event', '/add_chat', '/remove_chat',
+            '/list_chats', '/stats', '/owner_help'
+        ]
+    
+        # Если команда известна - проверяем разрешен ли чат
+        if command in known_commands:
+            if not await db_conn.is_chat_allowed(chat.id):
+                await self._handle_command_in_disallowed_chat(update, context)
+            # Если чат разрешен - команда обработается соответствующим обработчиком выше
+        else:
+            # Неизвестная команда - просто игнорируем
+            logger.debug(f"Игнорируем неизвестную команду: {command}")
+            # НИЧЕГО не делаем
+    
     async def _handle_ignore_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Пустой обработчик для полного игнорирования команд"""
         # АБСОЛЮТНО НИЧЕГО не делаем
