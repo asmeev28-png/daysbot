@@ -92,7 +92,7 @@ class BirthdayBot:
             self._handle_force_congratulate_reply, 
             filters=filters.ChatType.GROUPS
         ))
-
+        self.application.add_handler(CommandHandler("dr", self._handle_dr_search_reply, filters=filters.ChatType.GROUPS))
             
         # Обработчик добавления ДР через сообщение
         self.application.add_handler(MessageHandler(
@@ -165,6 +165,53 @@ class BirthdayBot:
         # Глобальный обработчик ошибок
         self.application.add_error_handler(self._error_handler)
 
+    async def _handle_dr_search_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик /dr через reply на сообщение"""
+        message = update.message
+        chat = update.effective_chat
+    
+        # Проверяем, что это reply на чье-то сообщение
+        if not message.reply_to_message:
+            # Если не reply, передаем обычному обработчику
+            return await self._handle_dr_search(update, context)
+    
+        replied_user = message.reply_to_message.from_user
+    
+        # Проверяем, разрешен ли чат
+        db_conn = context.bot_data['db']
+        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
+            return await self._handle_command_in_disallowed_chat(update, context)
+    
+        # Ищем день рождения в базе
+        birthday = await db_conn.get_birthday(replied_user.id, chat.id)
+    
+        month_names = [
+            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+        ]
+    
+        username_display = f"@{replied_user.username}" if replied_user.username else replied_user.full_name
+    
+        if birthday:
+            # Есть день рождения
+            date_str = f"{birthday['day']} {month_names[birthday['month']-1]}"
+            if birthday['year']:
+                date_str += f" {birthday['year']} года"
+        
+            message_text = f"📅 {username_display}: {date_str}"
+        else:
+            # Нет дня рождения
+            message_text = (
+                f"📅 {username_display}\n"
+                f"❌ День рождения не указан\n\n"
+                f"ID: `{replied_user.id}`\n"
+                f"Чтобы добавить день рождения:\n"
+                f"• Ответьте на сообщение пользователя и напишите `мой др [дата]`\n"
+                f"• Или администратор может добавить: `/add {replied_user.id} [дата]`"
+            )
+    
+        await update.message.reply_text(message_text, parse_mode='Markdown')
+    
     async def _handle_force_congratulate_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Обработчик /force_congratulate через reply на сообщение"""
             message = update.message
@@ -516,11 +563,12 @@ class BirthdayBot:
         """Обработчик команды /dr - поиск дня рождения"""
         db_conn = context.bot_data['db']
         chat = update.effective_chat
-        
+        message = update.message
+    
         # Проверяем, разрешен ли чат
         if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
             return await self._handle_command_in_disallowed_chat(update, context)
-        
+    
         if not context.args:
             await update.message.reply_text(
                 "❌ Укажите имя пользователя, username или ID.\n"
@@ -530,53 +578,212 @@ class BirthdayBot:
                 "• `/dr Имя Фамилия`"
             )
             return
+    
+        search_term = ' '.join(context.args)
+    
+        # ===== СПОСОБ 1: Упоминание через @username =====
+        if search_term.startswith('@'):
+            username = search_term[1:].lower()
+            found_users = []
         
-        search_term = ' '.join(context.args).lower()  # Приводим к нижнему регистру
+            # 1. Ищем в базе данных
+            cursor = await db_conn.conn.execute(
+                'SELECT * FROM birthdays WHERE chat_id = ? AND LOWER(username) = ?',
+                (chat.id, username)
+            )
+            rows = await cursor.fetchall()
         
-        # Получаем все дни рождения в чате
-        birthdays = await db_conn.get_birthdays_by_chat(chat.id)
+            for row in rows:
+                found_users.append(dict(row))
         
-        # Ищем совпадения
-        results = []
-        for bd in birthdays:
-            username_lower = bd['username'].lower() if bd['username'] else ''
-            fullname_lower = bd['full_name'].lower() if bd['full_name'] else ''
+            # 2. Если не нашли в базе, ищем среди администраторов чата
+            if not found_users:
+                try:
+                    admins = await chat.get_administrators()
+                    for admin in admins:
+                        if admin.user.username and admin.user.username.lower() == username:
+                            # Создаем запись из информации об администраторе
+                            user_info = {
+                                'user_id': admin.user.id,
+                                'username': admin.user.username,
+                                'full_name': admin.user.full_name,
+                                'day': None,
+                                'month': None,
+                                'year': None,
+                                'is_admin': True
+                            }
+                            found_users.append(user_info)
+                            break
+                except Exception as e:
+                    logger.warning(f"Ошибка поиска среди администраторов: {e}")
+        
+            # 3. Если все еще не нашли, ищем через getChat
+            if not found_users:
+                try:
+                    # Пробуем получить информацию о пользователе
+                    member = await chat.get_member(f"@{username}")
+                    if member.user:
+                        user_info = {
+                            'user_id': member.user.id,
+                            'username': member.user.username,
+                            'full_name': member.user.full_name,
+                            'day': None,
+                            'month': None,
+                            'year': None,
+                            'is_member': True
+                        }
+                        found_users.append(user_info)
+                except Exception as e:
+                    logger.debug(f"Не удалось найти пользователя @{username} через getChat: {e}")
+        
+            if not found_users:
+                await update.message.reply_text(
+                    f"❌ Пользователь @{username} не найден.\n\n"
+                    f"Причины:\n"
+                    f"1. Пользователь не указал свой день рождения в этом чате\n"
+                    f"2. Пользователь не является администратором чата\n"
+                    f"3. Username указан неверно\n\n"
+                    f"Попробуйте:\n"
+                    f"• Использовать ID пользователя\n"
+                    f"• Проверить правильность написания username"
+                )
+                return
+        
+            # Форматируем результаты
+            month_names = [
+                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+            ]
+        
+            if len(found_users) == 1:
+                user = found_users[0]
+                username_display = f"@{user['username']}" if user['username'] else user['full_name']
             
-            # Проверяем разные варианты совпадения
-            if (username_lower and search_term in username_lower) or \
-               (fullname_lower and search_term in fullname_lower) or \
-               str(bd['user_id']) == search_term:
-                results.append(bd)
+                if user.get('day') and user.get('month'):
+                    # Есть день рождения
+                    date_str = f"{user['day']} {month_names[user['month']-1]}"
+                    if user['year']:
+                        date_str += f" {user['year']} года"
+                    message_text = f"📅 {username_display}: {date_str}"
+                
+                    if user.get('is_admin'):
+                        message_text += " 👑 (администратор)"
+                    elif user.get('is_member'):
+                        message_text += " 👤 (участник чата)"
+                else:
+                    # Нет дня рождения
+                    message_text = f"📅 {username_display}\n"
+                    message_text += "❌ День рождения не указан\n\n"
+                    message_text += f"Чтобы добавить день рождения:\n"
+                    message_text += f"`мой др [дата]`\n"
+                    message_text += f"Или администратор может добавить:\n"
+                    message_text += f"`/add {user['user_id']} [дата]`"
+            
+                await update.message.reply_text(message_text)
+                return
         
-        if not results:
-            await update.message.reply_text("❌ Пользователь не найден.")
+            else:
+                # Несколько пользователей
+                message_text = "📅 Найдено несколько пользователей:\n\n"
+                for user in found_users[:5]:  # Ограничиваем 5 результатами
+                    username_display = f"@{user['username']}" if user['username'] else user['full_name']
+                
+                    if user.get('day') and user.get('month'):
+                        date_str = f"{user['day']} {month_names[user['month']-1]}"
+                        message_text += f"• {username_display}: {date_str}\n"
+                    else:
+                        message_text += f"• {username_display}: день рождения не указан\n"
+            
+                if len(found_users) > 5:
+                    message_text += f"\n... и еще {len(found_users) - 5}"
+            
+                await update.message.reply_text(message_text)
+                return
+    
+        # ===== СПОСОБ 2: Поиск по ID =====
+        elif search_term.isdigit():
+            user_id = int(search_term)
+        
+            # Ищем в базе данных
+            cursor = await db_conn.conn.execute(
+                'SELECT * FROM birthdays WHERE chat_id = ? AND user_id = ?',
+                (chat.id, user_id)
+            )
+            result = await cursor.fetchone()
+        
+            if result:
+                user = dict(result)
+                month_names = [
+                    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+                ]
+            
+                date_str = f"{user['day']} {month_names[user['month']-1]}"
+                if user['year']:
+                    date_str += f" {user['year']} года"
+            
+                username_display = f"@{user['username']}" if user['username'] else user['full_name']
+            
+                await update.message.reply_text(f"📅 {username_display}: {date_str}")
+            else:
+                # Пытаемся получить информацию о пользователе
+                try:
+                    user_chat = await context.bot.get_chat(user_id)
+                    username_display = f"@{user_chat.username}" if user_chat.username else user_chat.full_name
+                
+                    await update.message.reply_text(
+                        f"📅 {username_display}\n"
+                        f"❌ День рождения не указан в этом чате\n\n"
+                        f"ID: `{user_id}`\n"
+                        f"Чтобы добавить день рождения:\n"
+                        f"`/add {user_id} [дата]`"
+                    )
+                except Exception as e:
+                    await update.message.reply_text(
+                        f"❌ Пользователь с ID `{user_id}` не найден.\n\n"
+                        f"Проверьте правильность ID или используйте username."
+                    )
             return
-        
-        month_names = [
-            'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-            'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-        ]
-        
-        if len(results) == 1:
-            bd = results[0]
-            date_str = f"{bd['day']} {month_names[bd['month']-1]}"
-            
-            if bd['year']:
-                date_str += f" {bd['year']} года"
-            
-            username = f"@{bd['username']}" if bd['username'] else bd['full_name']
-            message = f"📅 {username}: {date_str}"
+    
+        # ===== СПОСОБ 3: Поиск по имени =====
         else:
-            message = "📅 Найдено несколько пользователей:\n\n"
-            for bd in results[:5]:  # Ограничиваем 5 результатами
-                date_str = f"{bd['day']} {month_names[bd['month']-1]}"
-                username = f"@{bd['username']}" if bd['username'] else bd['full_name']
-                message += f"• {username}: {date_str}\n"
-            
-            if len(results) > 5:
-                message += f"\n... и еще {len(results) - 5}"
+            # Ищем в базе данных
+            cursor = await db_conn.conn.execute(
+                'SELECT * FROM birthdays WHERE chat_id = ? AND (full_name LIKE ? OR LOWER(username) LIKE ?)',
+                (chat.id, f'%{search_term}%', f'%{search_term.lower()}%')
+            )
+            rows = await cursor.fetchall()
+            results = [dict(row) for row in rows]
         
-        await update.message.reply_text(message)
+            if not results:
+                await update.message.reply_text(f"❌ Пользователь '{search_term}' не найден в базе данных.")
+                return
+        
+            month_names = [
+                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+            ]
+        
+            if len(results) == 1:
+                user = results[0]
+                date_str = f"{user['day']} {month_names[user['month']-1]}"
+            
+                if user['year']:
+                    date_str += f" {user['year']} года"
+            
+                username_display = f"@{user['username']}" if user['username'] else user['full_name']
+                await update.message.reply_text(f"📅 {username_display}: {date_str}")
+            else:
+                message = "📅 Найдено несколько пользователей:\n\n"
+                for user in results[:5]:  # Ограничиваем 5 результатами
+                    date_str = f"{user['day']} {month_names[user['month']-1]}"
+                    username_display = f"@{user['username']}" if user['username'] else user['full_name']
+                    message += f"• {username_display}: {date_str}\n"
+            
+                if len(results) > 5:
+                    message += f"\n... и еще {len(results) - 5}"
+            
+                await update.message.reply_text(message)
     
     async def _handle_whoisnext(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /whoisnext"""
