@@ -476,11 +476,13 @@ class BirthdayBot:
         db_conn = context.bot_data['db']
         chat = update.effective_chat
     
-        # Проверяем, разрешен ли чат - НЕ проверяем для личных сообщений
-        if chat.type != 'private' and not await db_conn.is_chat_allowed(chat.id):
-            return await self._handle_command_in_disallowed_chat(update, context)
+        # Проверяем, разрешен ли чат - ТОЛЬКО для групповых чатов
+        if chat.type != 'private':
+            if not await db_conn.is_chat_allowed(chat.id):
+                # Вместо ошибки, покажем события если они есть
+                logger.info(f"Чат {chat.id} не в белом списке, но покажем события если есть")
     
-        # Получаем события чата - ВСЕ события, а не только активные
+        # Получаем события чата - ВСЕ события
         cursor = await db_conn.conn.execute(
             'SELECT * FROM events WHERE chat_id = ? ORDER BY month, day',
             (chat.id,)
@@ -493,32 +495,26 @@ class BirthdayBot:
                 "📅 Событий пока нет.\n\n"
                 "Чтобы добавить событие:\n"
                 "`/add_event 01.05 Название события`\n"
-                "Текст поздравления на следующей строке"
+                "Текст поздравления на следующей строке\n\n"
+                "Пример:\n"
+                "`/add_event 01.05 День весны и труда`\n"
+                "Поздравляем с 1 мая! Ура!"
             )
             return
     
         # Форматируем список
-        message = self._format_events_list(events)
-    
-        await update.message.reply_text(message, parse_mode='Markdown')
-
-    def _format_events_list(self, events):
-        """Форматирование списка событий"""
-        if not events:
-            return "📅 Событий пока нет."
+        message = "📅 **Список событий:**\n\n"
     
         month_names = [
             'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
             'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
         ]
     
-        message = "📅 **Список событий:**\n\n"
-    
         for event in events:
             date_str = f"{event['day']} {month_names[event['month']-1]}"
         
             if event['year']:
-                date_str += f" {event['year']} г."
+                date_str += f" ({event['year']} г.)"
         
             status = "✅" if event['is_active'] else "❌"
         
@@ -538,7 +534,7 @@ class BirthdayBot:
         message += "• `/toggle_event [ID]` - вкл/выкл событие\n"
         message += "• `/next_events` - ближайшие события"
     
-        return message
+        await update.message.reply_text(message, parse_mode='Markdown')
     
     async def _handle_next_events(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /next_events - ближайшие события"""
