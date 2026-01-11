@@ -88,9 +88,10 @@ class Database:
                 is_active BOOLEAN DEFAULT 1,
                 created_by INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (chat_id) REFERENCES allowed_chats(chat_id) ON DELETE CASCADE
             );
-            
+           
             -- Индекс для событий
             CREATE INDEX IF NOT EXISTS idx_events_date ON events(month, day);
             CREATE INDEX IF NOT EXISTS idx_events_chat ON events(chat_id);
@@ -354,30 +355,20 @@ class Database:
     
     # ========== МЕТОДЫ ДЛЯ СОБЫТИЙ ==========
     
-    async def add_event(self, chat_id: int, name: str, day: int, month: int, 
-                       year: Optional[int], message: str, media_type: Optional[str], 
-                       media_id: Optional[str], created_by: int) -> int:
-        """Добавить событие"""
+    async def add_event(self, chat_id, name, day, month, year=None, message=None, 
+                        media_type=None, media_id=None, created_by=None):
+        """Добавление события (все события повторяются ежегодно)"""
         try:
-            # Проверяем лимит событий
-            cursor = await self.conn.execute(
-                'SELECT COUNT(*) FROM events WHERE chat_id = ? AND is_active = 1',
-                (chat_id,)
-            )
-            count = (await cursor.fetchone())[0]
-            
-            if count >= Config.MAX_EVENTS_PER_CHAT:
-                raise ValueError(f"Достигнут лимит в {Config.MAX_EVENTS_PER_CHAT} событий на чат")
-            
             cursor = await self.conn.execute('''
-                INSERT INTO events (chat_id, name, day, month, year, message, media_type, media_id, created_by)
+                INSERT INTO events (chat_id, name, day, month, year, message, 
+                                   media_type, media_id, created_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (chat_id, name, day, month, year, message, media_type, media_id, created_by))
-            
+        
             await self.conn.commit()
             return cursor.lastrowid
         except Exception as e:
-            logger.error(f"Ошибка добавления события: {e}")
+            logger.error(f"Ошибка при добавлении события: {e}")
             raise
     
     async def get_todays_events(self, today: date) -> List[Dict]:
