@@ -79,6 +79,7 @@ class BirthdayBot:
         self.application.add_handler(CommandHandler("list_events", self._handle_list_events))
         self.application.add_handler(CommandHandler("next_events", self._handle_next_events))
         self.application.add_handler(CommandHandler("debug", self._handle_debug, filters=filters.ChatType.GROUPS))
+        self.application.add_handler(CommandHandler("add", self._handle_add_with_reply, filters=filters.ChatType.GROUPS))
         
         # Обработчик добавления ДР через сообщение
         self.application.add_handler(MessageHandler(
@@ -175,6 +176,73 @@ class BirthdayBot:
         )
     
         await update.message.reply_text(message, parse_mode='Markdown')
+
+
+    async def _handle_add_with_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик /add через reply на сообщение пользователя"""
+        message = update.message
+        chat = update.effective_chat
+    
+        # Проверяем, что это reply на чье-то сообщение
+        if not message.reply_to_message:
+            # Если не reply, передаем старому обработчику
+            return await self._handle_add_birthday_admin(update, context)
+    
+        replied_user = message.reply_to_message.from_user
+    
+        if len(context.args) < 1:
+            await update.message.reply_text(
+                "Использование: Ответьте на сообщение пользователя и напишите:\n"
+                "`/add [дата]`\n\n"
+                "Пример: `/add 11.01`\n\n"
+                f"Будет добавлен: {replied_user.full_name} (@{replied_user.username if replied_user.username else 'нет username'})"
+            )
+           return
+    
+        date_arg = ' '.join(context.args)
+    
+        # Парсим дату
+        parsed = DateParser.parse_birthday(f"др {date_arg}")
+    
+        if not parsed:
+            await update.message.reply_text("❌ Не удалось распознать дату.")
+            return
+    
+        day, month, year = parsed
+    
+        # Проверяем существование даты
+        from parsers import DateValidator
+        if not DateValidator.is_valid_date(day, month, year):
+            await update.message.reply_text("❌ Такой даты не существует.")
+            return
+    
+        # Добавляем в базу
+        db_conn = context.bot_data['db']
+        success = await db_conn.add_birthday(
+            user_id=replied_user.id,
+            chat_id=chat.id,
+            day=day,
+            month=month,
+            year=year,
+            username=replied_user.username,
+            full_name=replied_user.full_name,
+            created_by=update.effective_user.id
+        )
+    
+        if success:
+            month_names = [
+                'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+            ]
+        
+            date_str = f"{day} {month_names[month-1]}"
+            if year:
+                date_str += f" {year} года"
+        
+            username_display = f"@{replied_user.username}" if replied_user.username else replied_user.full_name
+            await update.message.reply_text(f"✅ День рождения для {username_display} добавлен: {date_str}")
+        else:
+            await update.message.reply_text("❌ Ошибка при добавлении.")
     
     async def _set_commands(self):
         """Установка команд меню"""
