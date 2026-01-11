@@ -145,6 +145,15 @@ class BirthdayBot:
         
         # Глобальный обработчик ошибок
         self.application.add_error_handler(self._error_handler)
+
+        self.application.add_handler(MessageHandler(
+            filters.COMMAND,
+            self._handle_do_nothing
+        ))
+    
+    async def _handle_do_nothing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Не делает ничего - игнорирует команду"""
+        pass
     
     async def _handle_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда для отладки"""
