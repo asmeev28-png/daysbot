@@ -371,7 +371,7 @@ class Database:
             logger.error(f"Ошибка при добавлении события: {e}")
             raise
     
-   async def get_todays_events(self, today: date) -> List[Dict]:
+    async def get_todays_events(self, today: date) -> List[Dict]:
         """Получить события на сегодня - ВСЕ события ежегодные"""
         day = today.day
         month = today.month
