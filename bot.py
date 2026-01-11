@@ -183,7 +183,7 @@ class BirthdayBot:
             admin_ids = [admin.user.id for admin in admins]
     
             if update.effective_user.id not in admin_ids and update.effective_user.id not in Config.get_owners():
-                await update.message.reply_text("❌ Только администраторы могут принудительно поздравлять.")
+                await update.message.reply_text("❌ Только администраторы могут поздравлять вне графика.")
                 return
     
             # Проверяем, разрешен ли чат
@@ -224,12 +224,11 @@ class BirthdayBot:
             # Формируем сообщение
             username_display = f"@{target_username}" if target_username else target_full_name
     
-            message_text = f"🎉 Принудительное поздравление для {username_display}!\n"
+            message_text = f"🎉 Поздравление для {username_display}!\n"
     
             if has_birthday:
                 message_text += birthday_info + "\n"
-            else:
-                message_text += "📝 (День рождения не указан)\n"
+            
     
             message_text += f"\n{congrats['text']}"
     
