@@ -113,7 +113,7 @@ class DateParser:
     
     @staticmethod
     def parse_event_command(text: str) -> Optional[Dict[str, Any]]:
-         """
+        """
         Парсинг команды добавления события
         ВСЕ события теперь ежегодные
         """
